@@ -1,0 +1,3 @@
+[submodule "src/renderer"]
+	path = src/renderer
+	url = https://github.com/skelitheprogrammer/levi-renderer.git
