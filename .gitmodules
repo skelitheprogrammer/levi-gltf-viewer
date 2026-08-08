@@ -1,3 +1,6 @@
 [submodule "src/renderer"]
 	path = src/renderer
 	url = https://github.com/skelitheprogrammer/levi-renderer.git
+[submodule "src/gpu"]
+	path = src/gpu
+	url = https://github.com/leotmp/no_gfx_api.git
