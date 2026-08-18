@@ -1,5 +1,6 @@
 package renderer
 
+import "core:fmt"
 import "core:mem"
 import "core:os"
 import "gpu/gpu"
@@ -16,10 +17,10 @@ load_to_staging :: proc(
 	arena: ^gpu.Arena,
 	allocator := context.allocator,
 ) -> Result {
-	work := os.get_executable_path(allocator) or_return
 	joined := resolve_asset_path(path, allocator) or_return
-
+	fmt.println(joined)
 	file_data := os.read_entire_file(joined, allocator) or_return
+	fmt.println(file_data)
 	defer delete(file_data)
 
 	data := cg.parse({}, raw_data(file_data), size_of(file_data)) or_return
@@ -53,7 +54,6 @@ process_meshes :: proc(renderer: ^Renderer, meshes: []cg.mesh, arena: ^gpu.Arena
 				}
 			}
 			if prim.indices != nil do idx_count += int(prim.indices.count)
-
 		}
 	}
 
@@ -63,9 +63,18 @@ process_meshes :: proc(renderer: ^Renderer, meshes: []cg.mesh, arena: ^gpu.Arena
 	if idx_count > 0 {
 		renderer.indices = gpu.arena_alloc(arena, u32, idx_count)
 	}
+
 	for t in Attribute_Type {
-		if attr_counts[t] > 0 {
-			renderer.attributes[t] = gpu.arena_alloc(arena, u8, attr_counts[t] * STRIDES[t])
+		count := attr_counts[t]
+
+		// If the model does not have this attribute, create a dummy buffer
+		// large enough for all vertices so the shader cannot read OOB memory.
+		if count == 0 {
+			count = pos_count
+		}
+
+		if count > 0 {
+			renderer.attributes[t] = gpu.arena_alloc(arena, u8, count * STRIDES[t])
 		}
 	}
 
@@ -148,6 +157,31 @@ process_meshes :: proc(renderer: ^Renderer, meshes: []cg.mesh, arena: ^gpu.Arena
 					}
 				}
 				idx_offset += count
+			}
+		}
+	}
+
+	// Fill missing attributes with safe default values.
+	for t in Attribute_Type {
+		if attr_counts[t] == 0 && len(renderer.attributes[t].cpu) > 0 {
+			byte_len := len(renderer.attributes[t].cpu)
+			elem_count := byte_len / STRIDES[t]
+			ptr := cast(^u8)raw_data(renderer.attributes[t].cpu)
+
+			for i in 0 ..< elem_count {
+				dst := mem.ptr_offset(ptr, i * STRIDES[t])
+
+				switch t {
+				case .NORMAL:
+					n := [3]f32{0, 1, 0}
+					mem.copy(dst, &n[0], STRIDES[t])
+				case .UV:
+					uv := [2]f32{0, 0}
+					mem.copy(dst, &uv[0], STRIDES[t])
+				case .COLOR:
+					c := [4]f32{1, 1, 1, 1}
+					mem.copy(dst, &c[0], STRIDES[t])
+				}
 			}
 		}
 	}

@@ -42,14 +42,16 @@ Attribute_Type :: enum {
 STRIDES := #partial [Attribute_Type]int {
 	.COLOR  = size_of([4]f32),
 	.NORMAL = size_of([3]f32),
+	.UV     = size_of([2]f32),
 }
 
 Renderer :: struct {
-	positions:     gpu.slice_t([3]f32),
-	indices:       gpu.slice_t(u32),
-	attributes:    [Attribute_Type]gpu.slice_t(u8),
-	gpu_positions: gpu.slice_t([3]f32),
-	gpu_indices:   gpu.slice_t(u32),
+	positions:      gpu.slice_t([3]f32),
+	indices:        gpu.slice_t(u32),
+	attributes:     [Attribute_Type]gpu.slice_t(u8),
+	gpu_positions:  gpu.slice_t([3]f32),
+	gpu_indices:    gpu.slice_t(u32),
+	gpu_attributes: [Attribute_Type]gpu.slice_t(u8),
 }
 
 upload_geometry :: proc(renderer: ^Renderer) {
@@ -62,6 +64,14 @@ upload_geometry :: proc(renderer: ^Renderer) {
 	upload_cmd := gpu.commands_begin(.Main)
 	gpu.cmd_mem_copy(upload_cmd, renderer.gpu_positions, renderer.positions)
 	gpu.cmd_mem_copy(upload_cmd, renderer.gpu_indices, renderer.indices)
+
+	for t in Attribute_Type {
+		attr_count := i32(len(renderer.attributes[t].cpu))
+		if attr_count > 0 {
+			renderer.gpu_attributes[t] = gpu.mem_alloc(u8, attr_count, gpu.Memory.GPU)
+			gpu.cmd_mem_copy(upload_cmd, renderer.gpu_attributes[t], renderer.attributes[t])
+		}
+	}
 
 	gpu.cmd_barrier(upload_cmd, .Transfer, .All, {})
 	gpu.queue_submit(.Main, {upload_cmd})

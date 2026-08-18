@@ -42,8 +42,8 @@ init :: proc(app: ^App, window: ^sdl.Window) {
 
 	shader_err: os.Error
 	app.shaders, shader_err = renderer.load_shader_pair(
-		"assets/shaders/unlit.vert.spv",
-		"assets/shaders/unlit.frag.spv",
+		"unlit.vert.spv",
+		"unlit.frag.spv",
 	); ensure(shader_err == os.ERROR_NONE)
 
 	renderer.init(&app.render)
@@ -60,10 +60,18 @@ init :: proc(app: ^App, window: ^sdl.Window) {
 
 destroy :: proc(app: ^App) {
 	gpu.wait_idle()
+
 	if app.model_loaded {
 		gpu.mem_free(app.model.gpu_positions)
 		gpu.mem_free(app.model.gpu_indices)
+
+		for t in renderer.Attribute_Type {
+			if len(app.model.gpu_attributes[t].cpu) > 0 {
+				gpu.mem_free(app.model.gpu_attributes[t])
+			}
+		}
 	}
+
 	gpu.arena_destroy(&app.staging_arena)
 	gpu.shader_destroy(app.shaders[.Vertex])
 	gpu.shader_destroy(app.shaders[.Fragment])
@@ -76,6 +84,13 @@ load_model :: proc(app: ^App, path: string) {
 	if app.model_loaded {
 		gpu.mem_free(app.model.gpu_positions)
 		gpu.mem_free(app.model.gpu_indices)
+
+		for t in renderer.Attribute_Type {
+			if len(app.model.gpu_attributes[t].cpu) > 0 {
+				gpu.mem_free(app.model.gpu_attributes[t])
+			}
+		}
+
 		app.model_loaded = false
 	}
 
@@ -234,8 +249,9 @@ render_frame :: proc(app: ^App) {
 
 	if app.model_loaded {
 		scene_data.cpu.positions = app.model.gpu_positions.gpu.ptr
-		scene_data.cpu.normals = app.model.attributes[.NORMAL].gpu.ptr
-		scene_data.cpu.uvs = app.model.attributes[.UV].gpu.ptr
+		scene_data.cpu.normals = app.model.gpu_attributes[.NORMAL].gpu.ptr
+		scene_data.cpu.uvs = app.model.gpu_attributes[.UV].gpu.ptr
+
 		gpu.cmd_draw_indexed(cmd, scene_data, frag_data, app.model.gpu_indices)
 	}
 

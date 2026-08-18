@@ -1,1 +1,3 @@
 /.ignore
+*.vert.spv
+*.frag.spv
