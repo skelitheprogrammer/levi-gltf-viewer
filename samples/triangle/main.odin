@@ -52,7 +52,7 @@ init :: proc(app: ^App, window: ^sdl.Window) {
 	renderer.init(&app.render)
 
 	app.cam = renderer.Camera {
-		pos   = {0.5, 0.5, 3},
+		pos   = {0.5, 0.5, -3},
 		yaw   = -90.0,
 		pitch = 0.0,
 	}
@@ -254,6 +254,8 @@ render_frame :: proc(app: ^App) {
 		},
 	)
 
+	gpu.cmd_set_raster_state(cmd, gpu.Raster_State{.Triangle_List, .Cull_CCW, true})
+
 	gpu.cmd_set_shaders(cmd, app.shaders[.Vertex], app.shaders[.Fragment])
 
 	if app.model_loaded {
@@ -291,6 +293,7 @@ main :: proc() {
 		720,
 		sdl.WINDOW_VULKAN | sdl.WINDOW_RESIZABLE,
 	)
+
 	if window == nil {
 		log.error("Failed to create window")
 		return

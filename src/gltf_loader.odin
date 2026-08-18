@@ -1,8 +1,8 @@
 package renderer
 
-import "core:fmt"
 import "core:mem"
 import "core:os"
+import "core:strings"
 import "gpu/gpu"
 import cg "vendor:cgltf"
 
@@ -18,13 +18,17 @@ load_to_staging :: proc(
 	allocator := context.allocator,
 ) -> Result {
 	joined := resolve_asset_path(path, allocator) or_return
-	fmt.println(joined)
+	defer delete(joined)
+
 	file_data := os.read_entire_file(joined, allocator) or_return
-	fmt.println(file_data)
 	defer delete(file_data)
 
 	data := cg.parse({}, raw_data(file_data), len(file_data)) or_return
-	cg.load_buffers({}, data, cast(cstring)raw_data(joined)) or_return
+
+	path_cstr := strings.clone_to_cstring(joined, allocator)
+	defer delete(path_cstr)
+	cg.load_buffers({}, data, path_cstr) or_return
+
 	defer cg.free(data)
 
 	process_meshes(renderer, data.meshes, arena)
@@ -67,8 +71,6 @@ process_meshes :: proc(renderer: ^Renderer, meshes: []cg.mesh, arena: ^gpu.Arena
 	for t in Attribute_Type {
 		count := attr_counts[t]
 
-		// If the model does not have this attribute, create a dummy buffer
-		// large enough for all vertices so the shader cannot read OOB memory.
 		if count == 0 {
 			count = pos_count
 		}
@@ -145,15 +147,28 @@ process_meshes :: proc(renderer: ^Renderer, meshes: []cg.mesh, arena: ^gpu.Arena
 				stride := int(acc.stride)
 				if stride == 0 {stride = elem_size}
 
-				dst_ptr := cast(^u8)&renderer.indices.cpu[idx_offset]
-
-				if stride == elem_size {
-					mem.copy(dst_ptr, src_ptr, elem_size * count)
-				} else {
+				// FIX 3: Explicitly cast to u32 to prevent index corruption
+				if acc.component_type == .r_16u {
 					for i in 0 ..< count {
-						src_elem := mem.ptr_offset(src_ptr, i * stride)
-						dst_elem := mem.ptr_offset(dst_ptr, i * size_of(u32))
-						mem.copy(dst_elem, src_elem, elem_size)
+						src_val := cast(^u16)mem.ptr_offset(src_ptr, i * stride)
+						renderer.indices.cpu[idx_offset + i] = u32(src_val^)
+					}
+				} else if acc.component_type == .r_8u {
+					for i in 0 ..< count {
+						src_val := cast(^u8)mem.ptr_offset(src_ptr, i * stride)
+						renderer.indices.cpu[idx_offset + i] = u32(src_val^)
+					}
+				} else {
+					// Assume u32 fallback
+					dst_ptr := cast(^u8)&renderer.indices.cpu[idx_offset]
+					if stride == elem_size {
+						mem.copy(dst_ptr, src_ptr, elem_size * count)
+					} else {
+						for i in 0 ..< count {
+							src_elem := mem.ptr_offset(src_ptr, i * stride)
+							dst_elem := mem.ptr_offset(dst_ptr, i * size_of(u32))
+							mem.copy(dst_elem, src_elem, elem_size)
+						}
 					}
 				}
 				idx_offset += count
@@ -161,7 +176,6 @@ process_meshes :: proc(renderer: ^Renderer, meshes: []cg.mesh, arena: ^gpu.Arena
 		}
 	}
 
-	// Fill missing attributes with safe default values.
 	for t in Attribute_Type {
 		if attr_counts[t] == 0 && len(renderer.attributes[t].cpu) > 0 {
 			byte_len := len(renderer.attributes[t].cpu)

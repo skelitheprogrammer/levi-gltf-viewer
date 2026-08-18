@@ -2,14 +2,12 @@ package renderer
 
 import "core:math"
 import "core:math/linalg"
-import "core:math/linalg/glsl"
 
 Camera :: struct {
 	pos:   linalg.Vector3f32,
 	yaw:   f32,
 	pitch: f32,
 }
-
 
 camera_get_front :: proc(cam: Camera) -> linalg.Vector3f32 {
 	yaw_rad := math.to_radians_f32(cam.yaw)
@@ -27,19 +25,25 @@ camera_get_right :: proc(cam: Camera) -> linalg.Vector3f32 {
 	return linalg.cross(front, up)
 }
 
-
-camera_get_view_matrix :: proc(cam: Camera) -> glsl.mat4 {
+camera_get_view_matrix :: proc(cam: Camera) -> linalg.Matrix4f32 {
 	front := camera_get_front(cam)
 	target := cam.pos + front
 	up := linalg.Vector3f32{0, 1, 0}
 
-	return glsl.mat4LookAt(cam.pos, target, up)
+	// matrix4_look_at defaults to flip_z_axis = true, which is correct for Vulkan (looking down -Z)
+	return linalg.matrix4_look_at(cam.pos, target, up)
 }
 
-camera_get_projection_matrix :: proc(aspect: f32) -> glsl.mat4 {
+camera_get_projection_matrix :: proc(aspect: f32) -> linalg.Matrix4f32 {
 	fov := math.to_radians_f32(60.0)
 
-	return glsl.mat4Perspective(fov, aspect, 0.1, 1000.0)
+	// matrix4_perspective defaults to flip_z_axis = true, which maps Z to [0, 1] for Vulkan
+	proj := linalg.matrix4_perspective(fov, aspect, 0.1, 1000.0)
+
+	// Vulkan requires Y to be flipped in clip space (Y-down)
+	proj[1, 1] = -proj[1, 1]
+
+	return proj
 }
 
 camera_get_vp :: proc(cam: Camera, aspect: f32) -> [16]f32 {
