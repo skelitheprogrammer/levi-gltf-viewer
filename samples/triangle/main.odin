@@ -3,13 +3,13 @@ package main
 import renderer "../../src/"
 import "../../src/gpu/gpu"
 import "core:fmt"
+import "core:log"
 import "core:math"
 import "core:os"
 import "core:strings"
 import "core:sync"
 import "core:thread"
 import sdl "vendor:sdl3"
-
 
 App :: struct {
 	window:        ^sdl.Window,
@@ -30,21 +30,24 @@ App :: struct {
 	has_pending:   bool,
 }
 
-
 init :: proc(app: ^App, window: ^sdl.Window) {
 	app.window = window
 	sdl.GetWindowSize(window, &app.win_w, &app.win_h)
 
-	ok := gpu.init(); ensure(ok)
-	gpu.swapchain_create_from_sdl(window, renderer.FLIGHT, .Mailbox)
+	ok := gpu.init()
+	if !ok {
+		log.error("Failed to initialize GPU")
+		return
+	}
+	gpu.swapchain_create_from_sdl(window, renderer.FLIGHT, .Fifo)
 
 	app.staging_arena = gpu.arena_create()
 
 	shader_err: os.Error
-	app.shaders, shader_err = renderer.load_shader_pair(
-		"unlit.vert.spv",
-		"unlit.frag.spv",
-	); ensure(shader_err == os.ERROR_NONE)
+	app.shaders, shader_err = renderer.load_shader_pair("unlit.vert.spv", "unlit.frag.spv")
+	if shader_err != os.ERROR_NONE {
+		log.errorf("Failed to load shaders: %v", shader_err)
+	}
 
 	renderer.init(&app.render)
 
@@ -53,9 +56,9 @@ init :: proc(app: ^App, window: ^sdl.Window) {
 		yaw   = -90.0,
 		pitch = 0.0,
 	}
+
 	app.next_frame = 1
 }
-
 
 destroy :: proc(app: ^App) {
 	gpu.wait_idle()
@@ -71,13 +74,16 @@ destroy :: proc(app: ^App) {
 		}
 	}
 
+	if app.model_path != "" {
+		delete(app.model_path)
+	}
+
 	gpu.arena_destroy(&app.staging_arena)
 	gpu.shader_destroy(app.shaders[.Vertex])
 	gpu.shader_destroy(app.shaders[.Fragment])
 	renderer.destroy(&app.render)
 	gpu.cleanup()
 }
-
 
 load_model :: proc(app: ^App, path: string) {
 	if app.model_loaded {
@@ -89,15 +95,19 @@ load_model :: proc(app: ^App, path: string) {
 				gpu.mem_free(app.model.gpu_attributes[t])
 			}
 		}
-
 		app.model_loaded = false
+	}
+
+	if app.model_path != "" {
+		delete(app.model_path)
 	}
 
 	gpu.arena_free_all(&app.staging_arena)
 
 	res := renderer.load_to_staging(path, &app.model, &app.staging_arena)
 	if res != nil {
-		fmt.eprintf("\rFailed to load '%s': %v\n> ", path, res)
+		log.errorf("Failed to load '%s': %v", path, res)
+		delete(path)
 		return
 	}
 
@@ -106,9 +116,9 @@ load_model :: proc(app: ^App, path: string) {
 
 	app.model_path = path
 	app.model_loaded = true
-	fmt.printf("\rLoaded: %s\n> ", path)
+	log.infof("Loaded: %s", path)
+	fmt.printf("> ")
 }
-
 
 stdin_reader :: proc(app: ^App) {
 	buf: [4096]byte
@@ -129,7 +139,6 @@ stdin_reader :: proc(app: ^App) {
 	}
 }
 
-
 resolve_path :: proc(app: ^App) -> string {
 	sync.mutex_lock(&app.path_mutex)
 	if app.has_pending {
@@ -142,22 +151,24 @@ resolve_path :: proc(app: ^App) -> string {
 	sync.mutex_unlock(&app.path_mutex)
 
 	if !app.model_loaded && len(os.args) > 1 {
-		return os.args[1]
+		return strings.clone(os.args[1])
 	}
 
 	return ""
 }
 
-
 run :: proc(app: ^App) {
 	event: sdl.Event
 	last_time := sdl.GetTicks()
 
-
 	thread.run_with_poly_data(app, stdin_reader)
 
-	fmt.printf("Type a model path + Enter to load.\n")
-	fmt.printf("Initial arg: %s\n", os.args[1] if len(os.args) > 1 else "(none)")
+	log.info("Type a model path + Enter to load.")
+	if len(os.args) > 1 {
+		log.infof("Initial arg: %s", os.args[1])
+	} else {
+		log.info("Initial arg: (none)")
+	}
 	fmt.printf("> ")
 
 	for !app.quit {
@@ -174,8 +185,9 @@ run :: proc(app: ^App) {
 		update_camera(app, dt)
 		render_frame(app)
 	}
-}
 
+	os.close(os.stdin)
+}
 
 poll_events :: proc(app: ^App, event: ^sdl.Event) {
 	for sdl.PollEvent(event) {
@@ -201,7 +213,6 @@ poll_events :: proc(app: ^App, event: ^sdl.Event) {
 	}
 }
 
-
 update_camera :: proc(app: ^App, dt: f32) {
 	front := renderer.camera_get_front(app.cam)
 	right := renderer.camera_get_right(app.cam)
@@ -214,7 +225,6 @@ update_camera :: proc(app: ^App, dt: f32) {
 	if app.keys[int(sdl.Scancode.SPACE)] do app.cam.pos.y += speed
 	if app.keys[int(sdl.Scancode.LSHIFT)] do app.cam.pos.y -= speed
 }
-
 
 render_frame :: proc(app: ^App) {
 	if app.next_frame > renderer.FLIGHT {
@@ -254,19 +264,25 @@ render_frame :: proc(app: ^App) {
 	}
 
 	gpu.cmd_end_render_pass(cmd)
-
-
 	gpu.cmd_add_signal_semaphore(cmd, app.render.frame_sem, app.next_frame)
-
 	gpu.queue_submit(.Main, {cmd})
 	gpu.swapchain_present(.Main, app.render.frame_sem, app.next_frame)
 
 	app.next_frame += 1
 }
 
-
 main :: proc() {
-	ok := sdl.Init(sdl.INIT_VIDEO); ensure(ok)
+	console_logger := log.create_console_logger()
+	defer log.destroy_console_logger(console_logger)
+	context.logger = console_logger
+
+	log.info("Starting application...")
+
+	ok := sdl.Init(sdl.INIT_VIDEO)
+	if !ok {
+		log.error("Failed to initialize SDL")
+		return
+	}
 	defer sdl.Quit()
 
 	window := sdl.CreateWindow(
@@ -274,14 +290,22 @@ main :: proc() {
 		1280,
 		720,
 		sdl.WINDOW_VULKAN | sdl.WINDOW_RESIZABLE,
-	); ensure(window != nil)
+	)
+	if window == nil {
+		log.error("Failed to create window")
+		return
+	}
 	defer sdl.DestroyWindow(window)
 
-	ok = sdl.SetWindowRelativeMouseMode(window, true); ensure(ok)
+	ok = sdl.SetWindowRelativeMouseMode(window, true)
+	if !ok {
+		log.warn("Failed to set relative mouse mode")
+	}
 
 	app: App
 	init(&app, window)
 	defer destroy(&app)
 
 	run(&app)
+	log.info("Application terminated successfully.")
 }
