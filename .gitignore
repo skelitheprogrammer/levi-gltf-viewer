@@ -1,3 +1,4 @@
 /.ignore
 *.vert.spv
 *.frag.spv
+/samples/triangle/triangle

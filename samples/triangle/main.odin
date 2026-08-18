@@ -49,11 +49,10 @@ init :: proc(app: ^App, window: ^sdl.Window) {
 	renderer.init(&app.render)
 
 	app.cam = renderer.Camera {
-		pos   = {0, 1, 3},
+		pos   = {0.5, 0.5, 3},
 		yaw   = -90.0,
 		pitch = 0.0,
 	}
-
 	app.next_frame = 1
 }
 
@@ -154,7 +153,7 @@ run :: proc(app: ^App) {
 	event: sdl.Event
 	last_time := sdl.GetTicks()
 
-	// Spawn stdin reader thread (detached)
+
 	thread.run_with_poly_data(app, stdin_reader)
 
 	fmt.printf("Type a model path + Enter to load.\n")
@@ -251,11 +250,13 @@ render_frame :: proc(app: ^App) {
 		scene_data.cpu.positions = app.model.gpu_positions.gpu.ptr
 		scene_data.cpu.normals = app.model.gpu_attributes[.NORMAL].gpu.ptr
 		scene_data.cpu.uvs = app.model.gpu_attributes[.UV].gpu.ptr
-
 		gpu.cmd_draw_indexed(cmd, scene_data, frag_data, app.model.gpu_indices)
 	}
 
 	gpu.cmd_end_render_pass(cmd)
+
+
+	gpu.cmd_add_signal_semaphore(cmd, app.render.frame_sem, app.next_frame)
 
 	gpu.queue_submit(.Main, {cmd})
 	gpu.swapchain_present(.Main, app.render.frame_sem, app.next_frame)

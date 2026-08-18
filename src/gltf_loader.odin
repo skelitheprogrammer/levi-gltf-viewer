@@ -23,7 +23,7 @@ load_to_staging :: proc(
 	fmt.println(file_data)
 	defer delete(file_data)
 
-	data := cg.parse({}, raw_data(file_data), size_of(file_data)) or_return
+	data := cg.parse({}, raw_data(file_data), len(file_data)) or_return
 	cg.load_buffers({}, data, cast(cstring)raw_data(joined)) or_return
 	defer cg.free(data)
 
