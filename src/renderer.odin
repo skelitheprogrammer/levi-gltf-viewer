@@ -24,15 +24,13 @@ Geometry :: struct {
 
 Renderer :: struct {
 	geometry:   Geometry,
-	models:     gpu.slice_t([16]f32),
 	draw_count: gpu.ptr_t(u32),
 }
 
 Scene_Data :: struct {
 	view_proj:  [16]f32,
-	models:     rawptr,
 	attributes: [Attribute_Semantic]rawptr,
-	attr_mask:  u32, // GPU-facing, shader reads as uint
+	attr_mask:  u32,
 }
 
 Frag_Data :: struct {
@@ -73,7 +71,6 @@ upload_geometry :: proc(r: ^Renderer) {
 	for &a in r.geometry.attributes do upload_slice(cmd, &a)
 	upload_slice(cmd, &r.geometry.indices)
 	upload_slice(cmd, &r.geometry.draws)
-	upload_slice(cmd, &r.models)
 	upload_ptr(cmd, &r.draw_count)
 	gpu.cmd_barrier(cmd, .Transfer, .All, {})
 	gpu.queue_submit(.Main, {cmd})

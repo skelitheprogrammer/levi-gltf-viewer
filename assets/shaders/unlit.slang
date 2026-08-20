@@ -2,13 +2,12 @@
 import "../shaders/shared/shared.slang";
 
 static const uint POSITION_BIT = 1u << 0;
-static const uint NORMAL_BIT = 1u << 1;
-static const uint UV_BIT = 1u << 2;
-static const uint COLOR_BIT = 1u << 3;
+static const uint NORMAL_BIT   = 1u << 1;
+static const uint UV_BIT       = 1u << 2;
+static const uint COLOR_BIT    = 1u << 3;
 
 struct VertexData {
   float4x4 viewProj;
-  uint64_t models;
   uint64_t attributes[4];
   uint attrMask;
 };

@@ -12,18 +12,11 @@ Result :: union #shared_nil {
 	cgltf.result,
 }
 
-sem_to_attr_type :: proc(sem: Attribute_Semantic) -> cgltf.attribute_type {
-	switch sem {
-	case .POSITION:
-		return .position
-	case .NORMAL:
-		return .normal
-	case .UV:
-		return .texcoord
-	case .COLOR:
-		return .color
-	}
-	return .position
+SEM_TO_ATTR_TYPE := [Attribute_Semantic]cgltf.attribute_type {
+	.POSITION = .position,
+	.NORMAL   = .normal,
+	.UV       = .texcoord,
+	.COLOR    = .color,
 }
 
 get_attribute :: proc(
@@ -62,7 +55,6 @@ load_geometry :: proc(
 
 	geo := &r.geometry
 
-	// Intersection: an attribute is usable only if every primitive has it.
 	present: Attribute_Set = {.POSITION, .NORMAL, .UV, .COLOR}
 	prim_count := 0
 	for mesh in data.meshes {
@@ -72,7 +64,7 @@ load_geometry :: proc(
 				return cgltf.result.invalid_gltf
 			}
 			for sem in Attribute_Semantic {
-				if get_attribute(&prim, sem_to_attr_type(sem)) == nil {
+				if get_attribute(&prim, SEM_TO_ATTR_TYPE[sem]) == nil {
 					present -= {sem}
 				}
 			}
@@ -94,7 +86,7 @@ load_geometry :: proc(
 				total_indices += int(pos.count)
 			}
 			for sem in present {
-				acc := get_attribute(&prim, sem_to_attr_type(sem))
+				acc := get_attribute(&prim, SEM_TO_ATTR_TYPE[sem])
 				sz := int(cgltf.calc_size(acc.type, acc.component_type))
 				if sz > max_attr_size[sem] {max_attr_size[sem] = sz}
 			}
@@ -123,7 +115,7 @@ load_geometry :: proc(
 			}
 
 			for sem in present {
-				acc := get_attribute(&prim, sem_to_attr_type(sem))
+				acc := get_attribute(&prim, SEM_TO_ATTR_TYPE[sem])
 				elem_size := int(cgltf.calc_size(acc.type, acc.component_type))
 				float_count := uint((elem_size / 4) * v_count)
 				dst := cast([^]f32)rawptr(

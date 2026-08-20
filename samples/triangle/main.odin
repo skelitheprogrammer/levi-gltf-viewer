@@ -1,3 +1,4 @@
+// samples/triangle/main.odin
 package main
 
 import renderer "../../src/"
@@ -53,7 +54,7 @@ init :: proc(app: ^App, window: ^sdl.Window) {
 
 	app.cam = renderer.Camera {
 		pos   = {0.0, 0.0, -1.0},
-		yaw   = -90.0,
+		yaw   = 90.0,
 		pitch = 0.0,
 	}
 
@@ -247,8 +248,7 @@ render_frame :: proc(app: ^App) {
 		for sem in renderer.Attribute_Semantic {
 			scene_data.cpu.attributes[sem] = app.model.geometry.attributes[sem].gpu.ptr
 		}
-		scene_data.cpu.models = app.model.models.gpu.ptr
-		scene_data.cpu.attr_mask = u32(card(app.model.geometry.attr_mask))
+		scene_data.cpu.attr_mask = transmute(u32)app.model.geometry.attr_mask
 		gpu.cmd_draw_indexed_indirect_multi(
 			cmd,
 			scene_data,
