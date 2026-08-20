@@ -62,11 +62,8 @@ load_geometry :: proc(
 
 	geo := &r.geometry
 
-	// An attribute is usable in a global stream only if EVERY primitive has it.
-	// Mixed presence would leave gaps, so we drop such attributes rather than
-	// fabricate fill data. POSITION is mandatory per the glTF spec.
-	present: [Attribute_Semantic]bool
-	for sem in Attribute_Semantic {present[sem] = true}
+	// Intersection: an attribute is usable only if every primitive has it.
+	present: Attribute_Set = {.POSITION, .NORMAL, .UV, .COLOR}
 	prim_count := 0
 	for mesh in data.meshes {
 		for &prim in mesh.primitives {
@@ -76,17 +73,14 @@ load_geometry :: proc(
 			}
 			for sem in Attribute_Semantic {
 				if get_attribute(&prim, sem_to_attr_type(sem)) == nil {
-					present[sem] = false
+					present -= {sem}
 				}
 			}
 		}
 	}
 	if prim_count == 0 {return cgltf.result.invalid_gltf}
 
-	geo.attr_mask = 0
-	for sem in Attribute_Semantic {
-		if present[sem] {geo.attr_mask |= attr_bit(sem)}
-	}
+	geo.attr_mask = present
 
 	total_vertices, total_indices := 0, 0
 	max_attr_size: [Attribute_Semantic]int
@@ -97,10 +91,9 @@ load_geometry :: proc(
 			if prim.indices != nil {
 				total_indices += int(prim.indices.count)
 			} else {
-				total_indices += int(pos.count) // identity indices synthesized below
+				total_indices += int(pos.count)
 			}
-			for sem in Attribute_Semantic {
-				if !present[sem] {continue}
+			for sem in present {
 				acc := get_attribute(&prim, sem_to_attr_type(sem))
 				sz := int(cgltf.calc_size(acc.type, acc.component_type))
 				if sz > max_attr_size[sem] {max_attr_size[sem] = sz}
@@ -108,14 +101,8 @@ load_geometry :: proc(
 		}
 	}
 
-	for sem in Attribute_Semantic {
-		if present[sem] {
-			geo.attributes[sem] = gpu.arena_alloc_slice(
-				arena,
-				u8,
-				total_vertices * max_attr_size[sem],
-			)
-		}
+	for sem in present {
+		geo.attributes[sem] = gpu.arena_alloc_slice(arena, u8, total_vertices * max_attr_size[sem])
 	}
 	geo.indices = gpu.arena_alloc_slice(arena, u32, total_indices)
 	geo.draws = gpu.arena_alloc_slice(arena, gpu.Draw_Indexed_Indirect_Command, prim_count)
@@ -135,8 +122,7 @@ load_geometry :: proc(
 				first_instance = 0,
 			}
 
-			for sem in Attribute_Semantic {
-				if !present[sem] {continue}
+			for sem in present {
 				acc := get_attribute(&prim, sem_to_attr_type(sem))
 				elem_size := int(cgltf.calc_size(acc.type, acc.component_type))
 				float_count := uint((elem_size / 4) * v_count)
@@ -153,8 +139,6 @@ load_geometry :: proc(
 				)
 				_ = cgltf.accessor_unpack_indices(prim.indices, dst, 4, uint(prim.indices.count))
 			} else {
-				// ponytail: identity indices = lossless non-indexed→indexed, keeps one
-				// indexed-indirect path. Local indices; vertex_offset supplies the base.
 				for i in 0 ..< v_count {
 					geo.indices.cpu[i_offset + i] = u32(i)
 				}
@@ -166,7 +150,6 @@ load_geometry :: proc(
 		}
 	}
 
-	// Arena-owned staging (reclaimed by arena_free_all); upload_ptr copies to GPU.
 	r.draw_count = gpu.arena_alloc(arena, u32)
 	r.draw_count.cpu^ = u32(prim_count)
 

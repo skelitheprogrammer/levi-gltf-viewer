@@ -1,3 +1,4 @@
+// src/renderer.odin
 package renderer
 
 import "gpu/gpu"
@@ -12,13 +13,11 @@ Attribute_Semantic :: enum {
 	COLOR,
 }
 
-attr_bit :: proc(sem: Attribute_Semantic) -> u32 {
-	return u32(1) << uint(int(sem))
-}
+Attribute_Set :: bit_set[Attribute_Semantic;u32]
 
 Geometry :: struct {
 	attributes: [Attribute_Semantic]gpu.slice_t(u8),
-	attr_mask:  u32,
+	attr_mask:  Attribute_Set,
 	indices:    gpu.slice_t(u32),
 	draws:      gpu.slice_t(gpu.Draw_Indexed_Indirect_Command),
 }
@@ -33,7 +32,7 @@ Scene_Data :: struct {
 	view_proj:  [16]f32,
 	models:     rawptr,
 	attributes: [Attribute_Semantic]rawptr,
-	attr_mask:  u32,
+	attr_mask:  u32, // GPU-facing, shader reads as uint
 }
 
 Frag_Data :: struct {
@@ -83,7 +82,7 @@ upload_geometry :: proc(r: ^Renderer) {
 
 free_geometry :: proc(r: ^Renderer) {
 	for sem in Attribute_Semantic {
-		if (r.geometry.attr_mask & attr_bit(sem)) != 0 {
+		if sem in r.geometry.attr_mask {
 			gpu.mem_free(r.geometry.attributes[sem])
 		}
 	}

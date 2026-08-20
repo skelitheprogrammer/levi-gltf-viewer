@@ -248,7 +248,7 @@ render_frame :: proc(app: ^App) {
 			scene_data.cpu.attributes[sem] = app.model.geometry.attributes[sem].gpu.ptr
 		}
 		scene_data.cpu.models = app.model.models.gpu.ptr
-		scene_data.cpu.attr_mask = app.model.geometry.attr_mask
+		scene_data.cpu.attr_mask = u32(card(app.model.geometry.attr_mask))
 		gpu.cmd_draw_indexed_indirect_multi(
 			cmd,
 			scene_data,
