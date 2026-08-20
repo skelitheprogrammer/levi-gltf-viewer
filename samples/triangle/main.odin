@@ -1,4 +1,3 @@
-// samples/triangle/main.odin
 package main
 
 import renderer "../../src/"
@@ -46,9 +45,7 @@ init :: proc(app: ^App, window: ^sdl.Window) {
 
 	shader_err: os.Error
 	app.shaders, shader_err = renderer.load_shader_pair("unlit.vert.spv", "unlit.frag.spv")
-	if shader_err != os.ERROR_NONE {
-		log.errorf("Failed to load shaders: %v", shader_err)
-	}
+	if shader_err != os.ERROR_NONE do log.errorf("Failed to load shaders: %v", shader_err)
 
 	renderer.init(&app.render)
 
@@ -64,13 +61,8 @@ init :: proc(app: ^App, window: ^sdl.Window) {
 destroy :: proc(app: ^App) {
 	gpu.wait_idle()
 
-	if app.model_loaded {
-		renderer.free_geometry(&app.model)
-	}
-
-	if app.model_path != "" {
-		delete(app.model_path)
-	}
+	if app.model_loaded do renderer.free_geometry(&app.model)
+	if app.model_path != "" do delete(app.model_path)
 
 	gpu.arena_destroy(&app.staging_arena)
 	gpu.shader_destroy(app.shaders[.Vertex])
@@ -85,9 +77,7 @@ load_model :: proc(app: ^App, path: string) {
 		app.model_loaded = false
 	}
 
-	if app.model_path != "" {
-		delete(app.model_path)
-	}
+	if app.model_path != "" do delete(app.model_path)
 
 	gpu.arena_free_all(&app.staging_arena)
 
@@ -98,7 +88,7 @@ load_model :: proc(app: ^App, path: string) {
 		return
 	}
 
-	renderer.upload_geometry(&app.model)
+	renderer.submit_geometry(&app.model)
 	gpu.arena_free_all(&app.staging_arena)
 
 	app.model_path = path
@@ -128,6 +118,7 @@ stdin_reader :: proc(app: ^App) {
 
 resolve_path :: proc(app: ^App) -> string {
 	sync.mutex_lock(&app.path_mutex)
+
 	if app.has_pending {
 		path := app.pending_path
 		app.pending_path = ""
@@ -135,11 +126,11 @@ resolve_path :: proc(app: ^App) -> string {
 		sync.mutex_unlock(&app.path_mutex)
 		return path
 	}
+
 	sync.mutex_unlock(&app.path_mutex)
 
-	if !app.model_loaded && len(os.args) > 1 {
-		return strings.clone(os.args[1])
-	}
+	if !app.model_loaded && len(os.args) > 1 do return strings.clone(os.args[1])
+
 
 	return ""
 }
@@ -151,11 +142,9 @@ run :: proc(app: ^App) {
 	thread.run_with_poly_data(app, stdin_reader)
 
 	log.info("Type a model path + Enter to load.")
-	if len(os.args) > 1 {
-		log.infof("Initial arg: %s", os.args[1])
-	} else {
-		log.info("Initial arg: (none)")
-	}
+	if len(os.args) > 1 do log.infof("Initial arg: %s", os.args[1])
+	else do log.info("Initial arg: (none)")
+
 	fmt.printf("> ")
 
 	for !app.quit {
@@ -165,9 +154,7 @@ run :: proc(app: ^App) {
 
 		poll_events(app, &event)
 
-		if path := resolve_path(app); path != "" {
-			load_model(app, path)
-		}
+		if path := resolve_path(app); path != "" do load_model(app, path)
 
 		update_camera(app, dt)
 		render_frame(app)
@@ -184,9 +171,7 @@ poll_events :: proc(app: ^App, event: ^sdl.Event) {
 		case .WINDOW_RESIZED:
 			app.win_w = event.window.data1
 			app.win_h = event.window.data2
-			if app.win_w > 0 && app.win_h > 0 {
-				gpu.swapchain_resize({u32(app.win_w), u32(app.win_h)})
-			}
+			if app.win_w > 0 && app.win_h > 0 do gpu.swapchain_resize({u32(app.win_w), u32(app.win_h)})
 		case .KEY_DOWN:
 			if event.key.scancode == .ESCAPE do app.quit = true
 			app.keys[int(event.key.scancode)] = true
@@ -214,9 +199,7 @@ update_camera :: proc(app: ^App, dt: f32) {
 }
 
 render_frame :: proc(app: ^App) {
-	if app.next_frame > renderer.FLIGHT {
-		gpu.semaphore_wait(app.render.frame_sem, app.next_frame - renderer.FLIGHT)
-	}
+	if app.next_frame > renderer.FLIGHT do gpu.semaphore_wait(app.render.frame_sem, app.next_frame - renderer.FLIGHT)
 
 	swapchain_tex := gpu.swapchain_acquire_next()
 	fa := &app.render.frame_arenas[app.next_frame % renderer.FLIGHT]
@@ -245,10 +228,10 @@ render_frame :: proc(app: ^App) {
 	gpu.cmd_set_shaders(cmd, app.shaders[.Vertex], app.shaders[.Fragment])
 
 	if app.model_loaded {
-		for sem in renderer.Attribute_Semantic {
+		for sem in renderer.Attribute_Type {
 			scene_data.cpu.attributes[sem] = app.model.geometry.attributes[sem].gpu.ptr
 		}
-		scene_data.cpu.attr_mask = transmute(u32)app.model.geometry.attr_mask
+		scene_data.cpu.attr_mask = app.model.geometry.attr_mask
 		gpu.cmd_draw_indexed_indirect_multi(
 			cmd,
 			scene_data,

@@ -1,4 +1,3 @@
-// src/gltf_loader.odin
 package renderer
 
 import "core:c"
@@ -12,7 +11,7 @@ Result :: union #shared_nil {
 	cgltf.result,
 }
 
-SEM_TO_ATTR_TYPE := [Attribute_Semantic]cgltf.attribute_type {
+SEM_TO_ATTR_TYPE := [Attribute_Type]cgltf.attribute_type {
 	.POSITION = .position,
 	.NORMAL   = .normal,
 	.UV       = .texcoord,
@@ -23,11 +22,7 @@ get_attribute :: proc(
 	primitive: ^cgltf.primitive,
 	attr_type: cgltf.attribute_type,
 ) -> ^cgltf.accessor {
-	for attr in primitive.attributes {
-		if attr.type == attr_type && attr.index == 0 {
-			return attr.data
-		}
-	}
+	for attr in primitive.attributes do if attr.type == attr_type && attr.index == 0 do return attr.data
 	return nil
 }
 
@@ -60,22 +55,17 @@ load_geometry :: proc(
 	for mesh in data.meshes {
 		for &prim in mesh.primitives {
 			prim_count += 1
-			if get_attribute(&prim, .position) == nil {
-				return cgltf.result.invalid_gltf
-			}
-			for sem in Attribute_Semantic {
-				if get_attribute(&prim, SEM_TO_ATTR_TYPE[sem]) == nil {
-					present -= {sem}
-				}
-			}
+			if get_attribute(&prim, .position) == nil do return cgltf.result.invalid_gltf
+
+			for sem in Attribute_Type do if get_attribute(&prim, SEM_TO_ATTR_TYPE[sem]) == nil do present -= {sem}
 		}
 	}
-	if prim_count == 0 {return cgltf.result.invalid_gltf}
+	if prim_count == 0 do return cgltf.result.invalid_gltf
 
 	geo.attr_mask = present
 
 	total_vertices, total_indices := 0, 0
-	max_attr_size: [Attribute_Semantic]int
+	max_attr_size: [Attribute_Type]int
 	for mesh in data.meshes {
 		for &prim in mesh.primitives {
 			pos := get_attribute(&prim, .position)
@@ -88,14 +78,13 @@ load_geometry :: proc(
 			for sem in present {
 				acc := get_attribute(&prim, SEM_TO_ATTR_TYPE[sem])
 				sz := int(cgltf.calc_size(acc.type, acc.component_type))
-				if sz > max_attr_size[sem] {max_attr_size[sem] = sz}
+				if sz > max_attr_size[sem] do max_attr_size[sem] = sz
 			}
 		}
 	}
 
-	for sem in present {
-		geo.attributes[sem] = gpu.arena_alloc_slice(arena, u8, total_vertices * max_attr_size[sem])
-	}
+	for sem in present do geo.attributes[sem] = gpu.arena_alloc_slice(arena, u8, total_vertices * max_attr_size[sem])
+
 	geo.indices = gpu.arena_alloc_slice(arena, u32, total_indices)
 	geo.draws = gpu.arena_alloc_slice(arena, gpu.Draw_Indexed_Indirect_Command, prim_count)
 
@@ -130,11 +119,8 @@ load_geometry :: proc(
 					uintptr(raw_data(geo.indices.cpu)) + uintptr(i_offset * size_of(u32)),
 				)
 				_ = cgltf.accessor_unpack_indices(prim.indices, dst, 4, uint(prim.indices.count))
-			} else {
-				for i in 0 ..< v_count {
-					geo.indices.cpu[i_offset + i] = u32(i)
-				}
-			}
+			} else do for i in 0 ..< v_count do geo.indices.cpu[i_offset + i] = u32(i)
+
 
 			v_offset += v_count
 			i_offset += i_count

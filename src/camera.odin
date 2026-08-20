@@ -1,4 +1,3 @@
-// src/camera.odin
 package renderer
 
 import "core:math"

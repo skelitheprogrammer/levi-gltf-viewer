@@ -6,17 +6,17 @@ import "gpu/gpu"
 GPU :: gpu.Memory.GPU
 FLIGHT :: 3
 
-Attribute_Semantic :: enum {
+Attribute_Type :: enum {
 	POSITION,
 	NORMAL,
 	UV,
 	COLOR,
 }
 
-Attribute_Set :: bit_set[Attribute_Semantic;u32]
+Attribute_Set :: bit_set[Attribute_Type;u32]
 
 Geometry :: struct {
-	attributes: [Attribute_Semantic]gpu.slice_t(u8),
+	attributes: [Attribute_Type]gpu.slice_t(u8),
 	attr_mask:  Attribute_Set,
 	indices:    gpu.slice_t(u32),
 	draws:      gpu.slice_t(gpu.Draw_Indexed_Indirect_Command),
@@ -29,8 +29,8 @@ Renderer :: struct {
 
 Scene_Data :: struct {
 	view_proj:  [16]f32,
-	attributes: [Attribute_Semantic]rawptr,
-	attr_mask:  u32,
+	attributes: [Attribute_Type]rawptr,
+	attr_mask:  Attribute_Set,
 }
 
 Frag_Data :: struct {
@@ -66,7 +66,7 @@ upload_ptr :: proc(cmd: gpu.Command_Buffer, p: ^gpu.ptr_t($T)) {
 	gpu.cmd_mem_copy(cmd, p^, staging)
 }
 
-upload_geometry :: proc(r: ^Renderer) {
+submit_geometry :: proc(r: ^Renderer) {
 	cmd := gpu.commands_begin(.Main)
 	for &a in r.geometry.attributes do upload_slice(cmd, &a)
 	upload_slice(cmd, &r.geometry.indices)
@@ -78,7 +78,7 @@ upload_geometry :: proc(r: ^Renderer) {
 }
 
 free_geometry :: proc(r: ^Renderer) {
-	for sem in Attribute_Semantic {
+	for sem in Attribute_Type {
 		if sem in r.geometry.attr_mask {
 			gpu.mem_free(r.geometry.attributes[sem])
 		}
