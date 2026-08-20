@@ -12,8 +12,13 @@ Attribute_Semantic :: enum {
 	COLOR,
 }
 
+attr_bit :: proc(sem: Attribute_Semantic) -> u32 {
+	return u32(1) << uint(int(sem))
+}
+
 Geometry :: struct {
 	attributes: [Attribute_Semantic]gpu.slice_t(u8),
+	attr_mask:  u32,
 	indices:    gpu.slice_t(u32),
 	draws:      gpu.slice_t(gpu.Draw_Indexed_Indirect_Command),
 }
@@ -28,6 +33,7 @@ Scene_Data :: struct {
 	view_proj:  [16]f32,
 	models:     rawptr,
 	attributes: [Attribute_Semantic]rawptr,
+	attr_mask:  u32,
 }
 
 Frag_Data :: struct {
@@ -60,9 +66,7 @@ upload_slice :: proc(cmd: gpu.Command_Buffer, s: ^gpu.slice_t($T)) {
 upload_ptr :: proc(cmd: gpu.Command_Buffer, p: ^gpu.ptr_t($T)) {
 	staging := p^
 	p^ = gpu.mem_alloc_ptr(T, GPU)
-	if staging.cpu != nil {
-		gpu.cmd_mem_copy(cmd, p^, staging)
-	}
+	gpu.cmd_mem_copy(cmd, p^, staging)
 }
 
 upload_geometry :: proc(r: ^Renderer) {
@@ -78,10 +82,13 @@ upload_geometry :: proc(r: ^Renderer) {
 }
 
 free_geometry :: proc(r: ^Renderer) {
-	for a in r.geometry.attributes do gpu.mem_free(a)
+	for sem in Attribute_Semantic {
+		if (r.geometry.attr_mask & attr_bit(sem)) != 0 {
+			gpu.mem_free(r.geometry.attributes[sem])
+		}
+	}
 	gpu.mem_free(r.geometry.indices)
 	gpu.mem_free(r.geometry.draws)
-	gpu.mem_free(r.models)
 	gpu.mem_free(r.draw_count)
 	r^ = {}
 }

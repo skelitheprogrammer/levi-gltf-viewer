@@ -30,17 +30,14 @@ camera_get_view_matrix :: proc(cam: Camera) -> linalg.Matrix4f32 {
 	target := cam.pos + front
 	up := linalg.Vector3f32{0, 1, 0}
 
-	// matrix4_look_at defaults to flip_z_axis = true, which is correct for Vulkan (looking down -Z)
 	return linalg.matrix4_look_at(cam.pos, target, up)
 }
 
 camera_get_projection_matrix :: proc(aspect: f32) -> linalg.Matrix4f32 {
 	fov := math.to_radians_f32(60.0)
 
-	// matrix4_perspective defaults to flip_z_axis = true, which maps Z to [0, 1] for Vulkan
 	proj := linalg.matrix4_perspective(fov, aspect, 0.1, 1000.0)
 
-	// Vulkan requires Y to be flipped in clip space (Y-down)
 	proj[1, 1] = -proj[1, 1]
 
 	return proj

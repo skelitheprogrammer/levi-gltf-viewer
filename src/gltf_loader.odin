@@ -1,3 +1,4 @@
+// src/gltf_loader.odin
 package renderer
 
 import "core:c"
@@ -6,24 +7,23 @@ import "core:strings"
 import "gpu/gpu"
 import "vendor:cgltf"
 
-
 Result :: union #shared_nil {
 	os.Error,
 	cgltf.result,
 }
 
-attr_semantic :: proc(t: cgltf.attribute_type) -> (Attribute_Semantic, bool) {
-	#partial switch t {
-	case .position:
-		return .POSITION, true
-	case .normal:
-		return .NORMAL, true
-	case .texcoord:
-		return .UV, true
-	case .color:
-		return .COLOR, true
+sem_to_attr_type :: proc(sem: Attribute_Semantic) -> cgltf.attribute_type {
+	switch sem {
+	case .POSITION:
+		return .position
+	case .NORMAL:
+		return .normal
+	case .UV:
+		return .texcoord
+	case .COLOR:
+		return .color
 	}
-	return .POSITION, false
+	return .position
 }
 
 get_attribute :: proc(
@@ -40,7 +40,7 @@ get_attribute :: proc(
 
 load_geometry :: proc(
 	path: string,
-	geo: ^Geometry,
+	r: ^Renderer,
 	arena: ^gpu.Arena,
 	allocator := context.allocator,
 ) -> Result {
@@ -60,40 +60,72 @@ load_geometry :: proc(
 	res = cgltf.load_buffers({}, data, path_cstr)
 	if res != .success {return res}
 
-	total_vertices, total_indices, prim_count := 0, 0, 0
-	max_attr_size: [Attribute_Semantic]int
+	geo := &r.geometry
 
+	// An attribute is usable in a global stream only if EVERY primitive has it.
+	// Mixed presence would leave gaps, so we drop such attributes rather than
+	// fabricate fill data. POSITION is mandatory per the glTF spec.
+	present: [Attribute_Semantic]bool
+	for sem in Attribute_Semantic {present[sem] = true}
+	prim_count := 0
 	for mesh in data.meshes {
 		for &prim in mesh.primitives {
-			for attr in prim.attributes {
-				sem, ok := attr_semantic(attr.type)
-				if !ok || attr.index != 0 {continue}
-				sz := int(cgltf.calc_size(attr.data.type, attr.data.component_type))
+			prim_count += 1
+			if get_attribute(&prim, .position) == nil {
+				return cgltf.result.invalid_gltf
+			}
+			for sem in Attribute_Semantic {
+				if get_attribute(&prim, sem_to_attr_type(sem)) == nil {
+					present[sem] = false
+				}
+			}
+		}
+	}
+	if prim_count == 0 {return cgltf.result.invalid_gltf}
+
+	geo.attr_mask = 0
+	for sem in Attribute_Semantic {
+		if present[sem] {geo.attr_mask |= attr_bit(sem)}
+	}
+
+	total_vertices, total_indices := 0, 0
+	max_attr_size: [Attribute_Semantic]int
+	for mesh in data.meshes {
+		for &prim in mesh.primitives {
+			pos := get_attribute(&prim, .position)
+			total_vertices += int(pos.count)
+			if prim.indices != nil {
+				total_indices += int(prim.indices.count)
+			} else {
+				total_indices += int(pos.count) // identity indices synthesized below
+			}
+			for sem in Attribute_Semantic {
+				if !present[sem] {continue}
+				acc := get_attribute(&prim, sem_to_attr_type(sem))
+				sz := int(cgltf.calc_size(acc.type, acc.component_type))
 				if sz > max_attr_size[sem] {max_attr_size[sem] = sz}
 			}
-			if pos := get_attribute(&prim, .position); pos != nil {
-				total_vertices += int(pos.count)
-			}
-			if prim.indices != nil {total_indices += int(prim.indices.count)}
-			prim_count += 1
 		}
 	}
 
 	for sem in Attribute_Semantic {
-		geo.attributes[sem] = gpu.arena_alloc_slice(arena, u8, total_vertices * max_attr_size[sem])
+		if present[sem] {
+			geo.attributes[sem] = gpu.arena_alloc_slice(
+				arena,
+				u8,
+				total_vertices * max_attr_size[sem],
+			)
+		}
 	}
 	geo.indices = gpu.arena_alloc_slice(arena, u32, total_indices)
 	geo.draws = gpu.arena_alloc_slice(arena, gpu.Draw_Indexed_Indirect_Command, prim_count)
 
 	v_offset, i_offset, p_idx := 0, 0, 0
-
 	for mesh in data.meshes {
 		for &prim in mesh.primitives {
 			pos := get_attribute(&prim, .position)
-			idx := prim.indices
-
-			v_count := int(pos.count) if pos != nil else 0
-			i_count := int(idx.count) if idx != nil else 0
+			v_count := int(pos.count)
+			i_count := int(prim.indices.count) if prim.indices != nil else v_count
 
 			geo.draws.cpu[p_idx] = gpu.Draw_Indexed_Indirect_Command {
 				index_count    = u32(i_count),
@@ -103,14 +135,11 @@ load_geometry :: proc(
 				first_instance = 0,
 			}
 
-			for attr in prim.attributes {
-				sem, ok := attr_semantic(attr.type)
-				if !ok || attr.index != 0 {continue}
-
-				acc := attr.data
+			for sem in Attribute_Semantic {
+				if !present[sem] {continue}
+				acc := get_attribute(&prim, sem_to_attr_type(sem))
 				elem_size := int(cgltf.calc_size(acc.type, acc.component_type))
 				float_count := uint((elem_size / 4) * v_count)
-
 				dst := cast([^]f32)rawptr(
 					uintptr(raw_data(geo.attributes[sem].cpu)) +
 					uintptr(v_offset * max_attr_size[sem]),
@@ -118,11 +147,17 @@ load_geometry :: proc(
 				_ = cgltf.accessor_unpack_floats(acc, dst, float_count)
 			}
 
-			if idx != nil {
+			if prim.indices != nil {
 				dst := rawptr(
 					uintptr(raw_data(geo.indices.cpu)) + uintptr(i_offset * size_of(u32)),
 				)
-				_ = cgltf.accessor_unpack_indices(idx, dst, 4, uint(idx.count))
+				_ = cgltf.accessor_unpack_indices(prim.indices, dst, 4, uint(prim.indices.count))
+			} else {
+				// ponytail: identity indices = lossless non-indexed→indexed, keeps one
+				// indexed-indirect path. Local indices; vertex_offset supplies the base.
+				for i in 0 ..< v_count {
+					geo.indices.cpu[i_offset + i] = u32(i)
+				}
 			}
 
 			v_offset += v_count
@@ -130,5 +165,10 @@ load_geometry :: proc(
 			p_idx += 1
 		}
 	}
+
+	// Arena-owned staging (reclaimed by arena_free_all); upload_ptr copies to GPU.
+	r.draw_count = gpu.arena_alloc(arena, u32)
+	r.draw_count.cpu^ = u32(prim_count)
+
 	return nil
 }

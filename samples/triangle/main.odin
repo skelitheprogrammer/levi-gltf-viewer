@@ -52,7 +52,7 @@ init :: proc(app: ^App, window: ^sdl.Window) {
 	renderer.init(&app.render)
 
 	app.cam = renderer.Camera {
-		pos   = {0.5, 0.5, -3},
+		pos   = {0.0, 0.0, -1.0},
 		yaw   = -90.0,
 		pitch = 0.0,
 	}
@@ -90,7 +90,7 @@ load_model :: proc(app: ^App, path: string) {
 
 	gpu.arena_free_all(&app.staging_arena)
 
-	res := renderer.load_geometry(path, &app.model.geometry, &app.staging_arena)
+	res := renderer.load_geometry(path, &app.model, &app.staging_arena)
 	if res != nil {
 		log.errorf("Failed to load '%s': %v", path, res)
 		delete(path)
@@ -248,6 +248,7 @@ render_frame :: proc(app: ^App) {
 			scene_data.cpu.attributes[sem] = app.model.geometry.attributes[sem].gpu.ptr
 		}
 		scene_data.cpu.models = app.model.models.gpu.ptr
+		scene_data.cpu.attr_mask = app.model.geometry.attr_mask
 		gpu.cmd_draw_indexed_indirect_multi(
 			cmd,
 			scene_data,
@@ -284,7 +285,7 @@ main :: proc() {
 		"no_gfx_api + cgltf",
 		1280,
 		720,
-		sdl.WINDOW_VULKAN | sdl.WINDOW_RESIZABLE,
+		{.VULKAN, .RESIZABLE, .HIGH_PIXEL_DENSITY},
 	)
 
 	if window == nil {
