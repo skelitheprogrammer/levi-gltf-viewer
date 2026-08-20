@@ -6,17 +6,17 @@ import "gpu/gpu"
 GPU :: gpu.Memory.GPU
 FLIGHT :: 3
 
-Attribute_Type :: enum {
+Attribute_Semantic :: enum {
 	POSITION,
 	NORMAL,
 	UV,
 	COLOR,
 }
 
-Attribute_Set :: bit_set[Attribute_Type;u32]
+Attribute_Set :: bit_set[Attribute_Semantic;u32]
 
 Geometry :: struct {
-	attributes: [Attribute_Type]gpu.slice_t(u8),
+	attributes: [Attribute_Semantic]gpu.slice_t(u8),
 	attr_mask:  Attribute_Set,
 	indices:    gpu.slice_t(u32),
 	draws:      gpu.slice_t(gpu.Draw_Indexed_Indirect_Command),
@@ -29,8 +29,8 @@ Renderer :: struct {
 
 Scene_Data :: struct {
 	view_proj:  [16]f32,
-	attributes: [Attribute_Type]rawptr,
-	attr_mask:  Attribute_Set,
+	attributes: [Attribute_Semantic]rawptr,
+	attr_mask:  u32,
 }
 
 Frag_Data :: struct {
@@ -78,7 +78,7 @@ submit_geometry :: proc(r: ^Renderer) {
 }
 
 free_geometry :: proc(r: ^Renderer) {
-	for sem in Attribute_Type {
+	for sem in Attribute_Semantic {
 		if sem in r.geometry.attr_mask {
 			gpu.mem_free(r.geometry.attributes[sem])
 		}

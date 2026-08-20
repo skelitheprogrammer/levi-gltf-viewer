@@ -1,9 +1,10 @@
+// assets/shaders/unlit.slang
 import "../shaders/shared/shared.slang";
 
 static const uint POSITION_BIT = 1u << 0;
-static const uint NORMAL_BIT = 1u << 1;
-static const uint UV_BIT = 1u << 2;
-static const uint COLOR_BIT = 1u << 3;
+static const uint NORMAL_BIT   = 1u << 1;
+static const uint UV_BIT       = 1u << 2;
+static const uint COLOR_BIT    = 1u << 3;
 
 struct VertexData {
   float4x4 viewProj;
@@ -34,7 +35,7 @@ VSOutput vertMain(VSInput input,
   float3 pos = positions[input.vertexID];
   output.pos = mul(pipeline.vert->viewProj, float4(pos, 1.0));
 
-  float3 normal = float3(0.0, 0.0, 0.0);
+  float3 normal = float3(0.0, 1.0, 0.0);
   if ((pipeline.vert->attrMask & NORMAL_BIT) != 0) {
     float3 *normals = (float3 *)pipeline.vert->attributes[1];
     normal = normals[input.vertexID];
