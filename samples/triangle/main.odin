@@ -213,7 +213,7 @@ render_frame :: proc(app: ^App) {
 	scene_data.cpu.view_proj = renderer.camera_get_vp(app.cam, aspect)
 
 	frag_data := gpu.arena_alloc(fa, renderer.Frag_Data)
-	frag_data.cpu.base_color = {1.0, 0.5, 0.2, 1.0}
+	frag_data.cpu.base_color = {1.0, 1.0, 1.0, 1.0}
 
 	gpu.cmd_begin_render_pass(
 		cmd,
