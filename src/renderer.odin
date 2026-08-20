@@ -2,14 +2,32 @@ package renderer
 
 import "gpu/gpu"
 
+GPU :: gpu.Memory.GPU
 FLIGHT :: 3
 
-// In renderer.odin or shared.odin
+Attribute_Semantic :: enum {
+	POSITION,
+	NORMAL,
+	UV,
+	COLOR,
+}
+
+Geometry :: struct {
+	attributes: [Attribute_Semantic]gpu.slice_t(u8),
+	indices:    gpu.slice_t(u32),
+	draws:      gpu.slice_t(gpu.Draw_Indexed_Indirect_Command),
+}
+
+Renderer :: struct {
+	geometry:   Geometry,
+	models:     gpu.slice_t([16]f32),
+	draw_count: gpu.ptr_t(u32),
+}
+
 Scene_Data :: struct {
-	view_proj: [16]f32,
-	positions: rawptr,
-	normals:   rawptr,
-	uvs:       rawptr,
+	view_proj:  [16]f32,
+	models:     rawptr,
+	attributes: [Attribute_Semantic]rawptr,
 }
 
 Frag_Data :: struct {
@@ -32,48 +50,38 @@ destroy :: proc(state: ^Render_State) {
 	gpu.semaphore_destroy(state.frame_sem)
 }
 
-
-Attribute_Type :: enum {
-	COLOR,
-	NORMAL,
-	UV,
+upload_slice :: proc(cmd: gpu.Command_Buffer, s: ^gpu.slice_t($T)) {
+	if len(s.cpu) == 0 {return}
+	staging := s^
+	s^ = gpu.mem_alloc_slice(T, len(s.cpu), GPU)
+	gpu.cmd_mem_copy(cmd, s^, staging)
 }
 
-STRIDES := #partial [Attribute_Type]int {
-	.COLOR  = size_of([4]f32),
-	.NORMAL = size_of([3]f32),
-	.UV     = size_of([2]f32),
-}
-
-Renderer :: struct {
-	positions:      gpu.slice_t([3]f32),
-	indices:        gpu.slice_t(u32),
-	attributes:     [Attribute_Type]gpu.slice_t(u8),
-	gpu_positions:  gpu.slice_t([3]f32),
-	gpu_indices:    gpu.slice_t(u32),
-	gpu_attributes: [Attribute_Type]gpu.slice_t(u8),
-}
-
-upload_geometry :: proc(renderer: ^Renderer) {
-	pos_count := i32(len(renderer.positions.cpu))
-	idx_count := i32(len(renderer.indices.cpu))
-
-	renderer.gpu_positions = gpu.mem_alloc([3]f32, pos_count, gpu.Memory.GPU)
-	renderer.gpu_indices = gpu.mem_alloc(u32, idx_count, gpu.Memory.GPU)
-
-	upload_cmd := gpu.commands_begin(.Main)
-	gpu.cmd_mem_copy(upload_cmd, renderer.gpu_positions, renderer.positions)
-	gpu.cmd_mem_copy(upload_cmd, renderer.gpu_indices, renderer.indices)
-
-	for t in Attribute_Type {
-		attr_count := i32(len(renderer.attributes[t].cpu))
-		if attr_count > 0 {
-			renderer.gpu_attributes[t] = gpu.mem_alloc(u8, attr_count, gpu.Memory.GPU)
-			gpu.cmd_mem_copy(upload_cmd, renderer.gpu_attributes[t], renderer.attributes[t])
-		}
+upload_ptr :: proc(cmd: gpu.Command_Buffer, p: ^gpu.ptr_t($T)) {
+	staging := p^
+	p^ = gpu.mem_alloc_ptr(T, GPU)
+	if staging.cpu != nil {
+		gpu.cmd_mem_copy(cmd, p^, staging)
 	}
+}
 
-	gpu.cmd_barrier(upload_cmd, .Transfer, .All, {})
-	gpu.queue_submit(.Main, {upload_cmd})
+upload_geometry :: proc(r: ^Renderer) {
+	cmd := gpu.commands_begin(.Main)
+	for &a in r.geometry.attributes do upload_slice(cmd, &a)
+	upload_slice(cmd, &r.geometry.indices)
+	upload_slice(cmd, &r.geometry.draws)
+	upload_slice(cmd, &r.models)
+	upload_ptr(cmd, &r.draw_count)
+	gpu.cmd_barrier(cmd, .Transfer, .All, {})
+	gpu.queue_submit(.Main, {cmd})
 	gpu.wait_idle()
+}
+
+free_geometry :: proc(r: ^Renderer) {
+	for a in r.geometry.attributes do gpu.mem_free(a)
+	gpu.mem_free(r.geometry.indices)
+	gpu.mem_free(r.geometry.draws)
+	gpu.mem_free(r.models)
+	gpu.mem_free(r.draw_count)
+	r^ = {}
 }

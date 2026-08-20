@@ -64,14 +64,7 @@ destroy :: proc(app: ^App) {
 	gpu.wait_idle()
 
 	if app.model_loaded {
-		gpu.mem_free(app.model.gpu_positions)
-		gpu.mem_free(app.model.gpu_indices)
-
-		for t in renderer.Attribute_Type {
-			if len(app.model.gpu_attributes[t].cpu) > 0 {
-				gpu.mem_free(app.model.gpu_attributes[t])
-			}
-		}
+		renderer.free_geometry(&app.model)
 	}
 
 	if app.model_path != "" {
@@ -87,14 +80,7 @@ destroy :: proc(app: ^App) {
 
 load_model :: proc(app: ^App, path: string) {
 	if app.model_loaded {
-		gpu.mem_free(app.model.gpu_positions)
-		gpu.mem_free(app.model.gpu_indices)
-
-		for t in renderer.Attribute_Type {
-			if len(app.model.gpu_attributes[t].cpu) > 0 {
-				gpu.mem_free(app.model.gpu_attributes[t])
-			}
-		}
+		renderer.free_geometry(&app.model)
 		app.model_loaded = false
 	}
 
@@ -104,7 +90,7 @@ load_model :: proc(app: ^App, path: string) {
 
 	gpu.arena_free_all(&app.staging_arena)
 
-	res := renderer.load_to_staging(path, &app.model, &app.staging_arena)
+	res := renderer.load_geometry(path, &app.model.geometry, &app.staging_arena)
 	if res != nil {
 		log.errorf("Failed to load '%s': %v", path, res)
 		delete(path)
@@ -255,14 +241,21 @@ render_frame :: proc(app: ^App) {
 	)
 
 	gpu.cmd_set_raster_state(cmd, gpu.Raster_State{.Triangle_List, .Cull_CCW, true})
-
 	gpu.cmd_set_shaders(cmd, app.shaders[.Vertex], app.shaders[.Fragment])
 
 	if app.model_loaded {
-		scene_data.cpu.positions = app.model.gpu_positions.gpu.ptr
-		scene_data.cpu.normals = app.model.gpu_attributes[.NORMAL].gpu.ptr
-		scene_data.cpu.uvs = app.model.gpu_attributes[.UV].gpu.ptr
-		gpu.cmd_draw_indexed(cmd, scene_data, frag_data, app.model.gpu_indices)
+		for sem in renderer.Attribute_Semantic {
+			scene_data.cpu.attributes[sem] = app.model.geometry.attributes[sem].gpu.ptr
+		}
+		scene_data.cpu.models = app.model.models.gpu.ptr
+		gpu.cmd_draw_indexed_indirect_multi(
+			cmd,
+			scene_data,
+			frag_data,
+			app.model.geometry.indices,
+			app.model.geometry.draws,
+			app.model.draw_count,
+		)
 	}
 
 	gpu.cmd_end_render_pass(cmd)
