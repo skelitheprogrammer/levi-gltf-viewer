@@ -1,55 +1,107 @@
-package renderer
+package levi
 
 import "core:fmt"
-import "core:mem"
+import "core:log"
 import "core:os"
-import "gpu/gpu"
+import "core:path"
+import gpu "gpu/gpu"
 
 Shader_Pair :: [gpu.Shader_Type_Graphics]gpu.Shader
 
-load_spirv :: proc(path: string, allocator := context.allocator) -> (words: []u32, err: os.Error) {
-	resolved := resolve_asset_path(path, allocator) or_return
-	defer delete(resolved)
+Shader_System :: struct {
+	sources: map[string]string,
+	cache:   map[u32]Shader_Pair,
+}
 
-	data := os.read_entire_file(resolved, allocator) or_return
-	defer delete(data)
+shader_system_init :: proc(sys: ^Shader_System, shader_dir: string) {
+	files, ok := os.read_dir(shader_dir)
+	if !ok {
+		log.error("shader directory not found", "path", shader_dir)
+		return
+	}
+	for file in files {
+		if file.is_dir do continue
+		ext := path.extension(file.name)
+		if ext == ".slang" {
+			name := path.base_name(file.name, false)
+			sys.sources[name] = path.join({shader_dir, file.name})
+		}
+	}
+	log.info("shader system initialised", "sources", len(sys.sources))
+}
 
-	if len(data) % 4 != 0 {
-		fmt.eprintf("Invalid SPIR-V file (not 4-byte aligned): %s\n", resolved)
-		return nil, .Invalid_File
+shader_system_destroy :: proc(sys: ^Shader_System) {
+	for _, pair in sys.cache {
+		gpu.shader_destroy(pair[.Vertex])
+		gpu.shader_destroy(pair[.Fragment])
+	}
+}
+
+generate_vertex_entry :: proc(mask: Vertex_Mask) -> string {
+	has_nrm := Vertex_Attribute.Normal in mask
+	has_uv := Vertex_Attribute.UV0 in mask
+	return fmt.tprintf("vs_main<%s, %s>", has_nrm ? "true" : "false", has_uv ? "true" : "false")
+}
+
+shader_system_get_or_compile :: proc(sys: ^Shader_System, mask: Vertex_Mask) -> Shader_Pair {
+	raw_mask := cast(u32)mask
+	if p, ok := sys.cache[raw_mask]; ok do return p
+
+	src_path, ok := sys.sources["unlit"]
+	if !ok {
+		log.error("unlit.slang not found in shader directory")
+		return {}
 	}
 
-	word_count := len(data) / 4
-	words = make([]u32, word_count, allocator)
-	mem.copy(raw_data(words), raw_data(data), len(data))
-	return words, os.ERROR_NONE
+	vert_entry := generate_vertex_entry(mask)
+	frag_entry := "fs_main"
+
+	vert_spirv := compile_slang_stdout(src_path, vert_entry, "vertex")
+	frag_spirv := compile_slang_stdout(src_path, frag_entry, "fragment")
+
+	pair: Shader_Pair
+	pair[.Vertex] = gpu.shader_create(vert_spirv, .Vertex, vert_entry)
+	pair[.Fragment] = gpu.shader_create(frag_spirv, .Fragment, frag_entry)
+
+	sys.cache[raw_mask] = pair
+	log.info("shader compiled", "mask", raw_mask, "entry", vert_entry)
+	return pair
 }
 
+compile_slang_stdout :: proc(source, entry, stage: string) -> []u32 {
+	args := []string {
+		"slangc",
+		source,
+		"-entry",
+		entry,
+		"-stage",
+		stage,
+		"-target",
+		"spirv",
+		"-profile",
+		"glsl_460",
+		"-o",
+		"-",
+	}
 
-load_shader :: proc(
-	path: string,
-	type: gpu.Shader_Type_Graphics,
-	allocator := context.allocator,
-	loc := #caller_location,
-) -> (
-	shader: gpu.Shader,
-	err: os.Error,
-) {
-	words := load_spirv(path, allocator) or_return
-	defer delete(words)
-	return gpu.shader_create(words, type, loc = loc), os.ERROR_NONE
-}
+	read_end, write_end := os.pipe()
+	saved_stdout := os.dup(1)
+	os.dup2(write_end, 1)
+	os.close(write_end)
 
-load_shader_pair :: proc(
-	vert_path: string,
-	frag_path: string,
-	allocator := context.allocator,
-	loc := #caller_location,
-) -> (
-	pair: Shader_Pair,
-	err: os.Error,
-) {
-	pair[.Vertex] = load_shader(vert_path, .Vertex, allocator, loc) or_return
-	pair[.Fragment] = load_shader(frag_path, .Fragment, allocator, loc) or_return
-	return pair, os.ERROR_NONE
+	os.exec(args)
+
+	os.dup2(saved_stdout, 1)
+	os.close(saved_stdout)
+
+	buf: [dynamic]byte
+	tmp: [65536]byte
+	for {
+		n := os.read(read_end, tmp[:])
+		if n <= 0 do break
+		append(&buf, tmp[:n])
+	}
+	os.close(read_end)
+
+	return cast([]u32)buf[:]
 }

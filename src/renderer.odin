@@ -1,90 +1,148 @@
-// src/renderer.odin
-package renderer
+package levi
 
-import "gpu/gpu"
+import "core:math/linalg"
+import gpu "gpu/gpu"
 
-GPU :: gpu.Memory.GPU
-FLIGHT :: 3
-
-Attribute_Semantic :: enum {
-	POSITION,
-	NORMAL,
-	UV,
-	COLOR,
-}
-
-Attribute_Set :: bit_set[Attribute_Semantic;u32]
-
-Geometry :: struct {
-	attributes: [Attribute_Semantic]gpu.slice_t(u8),
-	attr_mask:  Attribute_Set,
-	indices:    gpu.slice_t(u32),
-	draws:      gpu.slice_t(gpu.Draw_Indexed_Indirect_Command),
-}
 
 Renderer :: struct {
-	geometry:   Geometry,
-	draw_count: gpu.ptr_t(u32),
+	state:        ^Render_State,
+	cmd_buf:      gpu.Command_Buffer,
+	swapchain:    gpu.Texture,
+	sort_indices: [dynamic]u32,
+	meshes:       [dynamic]Mesh_Data,
+	instances:    [dynamic]Mesh_Instance,
 }
 
-Scene_Data :: struct {
-	view_proj:  [16]f32,
-	attributes: [Attribute_Semantic]rawptr,
-	attr_mask:  u32,
+renderer_init :: proc(r: ^Renderer, state: ^Render_State) -> Error_Code {
+	r.state = state
+	return .None
 }
 
-Frag_Data :: struct {
-	base_color: [4]f32,
-}
-
-Render_State :: struct {
-	frame_arenas: [FLIGHT]gpu.Arena,
-	frame_sem:    gpu.Semaphore,
-}
-
-init :: proc(state: ^Render_State) {
-	for &f in state.frame_arenas do f = gpu.arena_create()
-	state.frame_sem = gpu.semaphore_create()
-}
-
-destroy :: proc(state: ^Render_State) {
-	gpu.wait_idle()
-	for &f in state.frame_arenas do gpu.arena_destroy(&f)
-	gpu.semaphore_destroy(state.frame_sem)
-}
-
-upload_slice :: proc(cmd: gpu.Command_Buffer, s: ^gpu.slice_t($T)) {
-	if len(s.cpu) == 0 {return}
-	staging := s^
-	s^ = gpu.mem_alloc_slice(T, len(s.cpu), GPU)
-	gpu.cmd_mem_copy(cmd, s^, staging)
-}
-
-upload_ptr :: proc(cmd: gpu.Command_Buffer, p: ^gpu.ptr_t($T)) {
-	staging := p^
-	p^ = gpu.mem_alloc_ptr(T, GPU)
-	gpu.cmd_mem_copy(cmd, p^, staging)
-}
-
-submit_geometry :: proc(r: ^Renderer) {
-	cmd := gpu.commands_begin(.Main)
-	for &a in r.geometry.attributes do upload_slice(cmd, &a)
-	upload_slice(cmd, &r.geometry.indices)
-	upload_slice(cmd, &r.geometry.draws)
-	upload_ptr(cmd, &r.draw_count)
-	gpu.cmd_barrier(cmd, .Transfer, .All, {})
-	gpu.queue_submit(.Main, {cmd})
-	gpu.wait_idle()
-}
-
-free_geometry :: proc(r: ^Renderer) {
-	for sem in Attribute_Semantic {
-		if sem in r.geometry.attr_mask {
-			gpu.mem_free(r.geometry.attributes[sem])
-		}
-	}
-	gpu.mem_free(r.geometry.indices)
-	gpu.mem_free(r.geometry.draws)
-	gpu.mem_free(r.draw_count)
+renderer_destroy :: proc(r: ^Renderer) {
+	delete(r.sort_indices)
+	delete(r.meshes)
+	delete(r.instances)
 	r^ = {}
+}
+
+renderer_begin_frame :: proc(r: ^Renderer) {
+	rs := r.state
+	flight_idx := render_state_flight_index(rs)
+
+	gpu.arena_free_all(&rs.frame_arenas[flight_idx])
+
+	if rs.frame_index >= FLIGHT {
+		gpu.semaphore_wait(rs.sem, rs.frame_index - FLIGHT)
+	}
+
+	r.swapchain = gpu.swapchain_acquire_next()
+	r.cmd_buf = gpu.commands_begin(.Main)
+
+	gpu.cmd_begin_render_pass(
+		r.cmd_buf,
+		gpu.Render_Pass_Desc {
+			color_attachments = {
+				{
+					texture = r.swapchain,
+					load_op = .Clear,
+					store_op = .Store,
+					clear_color = {0.08, 0.08, 0.1, 1.0},
+				},
+			},
+		},
+	)
+
+	gpu.cmd_set_depth_state(r.cmd_buf, gpu.Depth_State{mode = {.Read, .Write}, compare = .Less})
+	gpu.cmd_set_raster_state(
+		r.cmd_buf,
+		gpu.Raster_State{topology = .Triangle_List, cull_mode = .Cull_CCW},
+	)
+}
+
+renderer_end_frame :: proc(r: ^Renderer) {
+	rs := r.state
+
+	gpu.cmd_end_render_pass(r.cmd_buf)
+	gpu.queue_submit(.Main, {r.cmd_buf})
+	gpu.swapchain_present(.Main, rs.sem, rs.frame_index)
+
+	rs.frame_index += 1
+}
+
+renderer_upload_mesh :: proc(r: ^Renderer, staging: Staging_Data) {
+	rs := r.state
+
+	cmd_buf := gpu.commands_begin(.Transfer)
+	mesh := transfer_staging_to_gpu(cmd_buf, staging)
+	gpu.cmd_barrier(cmd_buf, .Transfer, .All, {})
+	gpu.queue_submit(.Transfer, {cmd_buf})
+	gpu.queue_wait_idle(.Transfer)
+
+	append(&r.meshes, mesh)
+}
+
+renderer_draw_meshes :: proc(r: ^Renderer, view_proj: linalg.Matrix4f32) {
+	if len(r.meshes) == 0 {return}
+
+	frame_data: Frame_Data
+	frame_data.view_proj = view_proj
+
+	for instance, _ in r.instances {
+		mesh := &r.meshes[instance.mesh_index]
+		if mesh.indirect_ptr.ptr == nil {continue}
+
+	}
+}
+
+
+transfer_staging_to_gpu :: proc(
+	cmd_buf: gpu.Command_Buffer,
+	staging: Staging_Data,
+) -> (
+	res: Mesh_Data,
+) {
+
+	res.vertex_mask = staging.vertex_mask
+	res.vertex_count = staging.vertex_count
+	res.index_count = staging.index_count
+	res.bounds_min = staging.bounds_min
+	res.bounds_max = staging.bounds_max
+
+	total_bytes: i64
+	for slice, _ in staging.attributes {
+		total_bytes += i64(len(slice.cpu))
+	}
+	total_bytes += i64(len(staging.indices.cpu))
+
+	if total_bytes == 0 {return}
+
+	backing := gpu.mem_alloc(u8, i32(total_bytes), gpu.Memory.GPU)
+	res.backing = backing.gpu
+
+	offset: i64 = 0
+	for slice, attr in staging.attributes {
+		if len(slice.cpu) == 0 {continue}
+
+		size := i64(len(slice.cpu))
+		region := gpu.subslice(backing, offset, offset + size)
+		gpu.cmd_mem_copy(cmd_buf, region, slice)
+
+		res.attributes[attr] = region.gpu
+		offset += size
+	}
+
+	if len(staging.indices.cpu) > 0 {
+		size := i64(len(staging.indices.cpu))
+		region := gpu.subslice(backing, offset, offset + size)
+		gpu.cmd_mem_copy(cmd_buf, region, staging.indices)
+		res.index_ptr = region.gpu
+	}
+
+	if len(staging.commands.cpu) > 0 {
+		indirect := gpu.mem_alloc(Indirect_Command, i32(len(staging.commands.cpu)), gpu.Memory.GPU)
+		gpu.cmd_mem_copy(cmd_buf, indirect, staging.commands)
+		res.indirect_ptr = indirect.gpu
+	}
+
+	return res
 }

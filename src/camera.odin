@@ -1,46 +1,19 @@
-package renderer
+package levi
 
-import "core:math"
 import "core:math/linalg"
 
 Camera :: struct {
-	pos:   linalg.Vector3f32,
-	yaw:   f32,
-	pitch: f32,
+	position: linalg.Vector3f32,
+	forward:  linalg.Vector3f32,
+	up:       linalg.Vector3f32,
+	fov:      f32,
+	aspect:   f32,
+	near:     f32,
+	far:      f32,
 }
 
-camera_get_front :: proc(cam: Camera) -> linalg.Vector3f32 {
-	yaw_rad := math.to_radians_f32(cam.yaw)
-	pitch_rad := math.to_radians_f32(cam.pitch)
-	cp := math.cos(pitch_rad)
-	return linalg.normalize(
-		linalg.Vector3f32{math.cos(yaw_rad) * cp, math.sin(pitch_rad), math.sin(yaw_rad) * cp},
-	)
-}
-
-camera_get_right :: proc(cam: Camera) -> linalg.Vector3f32 {
-	front := camera_get_front(cam)
-	up := linalg.Vector3f32{0, 1, 0}
-	return linalg.normalize(linalg.cross(front, up))
-}
-
-camera_get_view_matrix :: proc(cam: Camera) -> linalg.Matrix4f32 {
-	front := camera_get_front(cam)
-	target := cam.pos + front
-	up := linalg.Vector3f32{0, 1, 0}
-	return linalg.matrix4_look_at(cam.pos, target, up)
-}
-
-camera_get_projection_matrix :: proc(aspect: f32) -> linalg.Matrix4f32 {
-	fov := math.to_radians_f32(60.0)
-	proj := linalg.matrix4_perspective(fov, aspect, 0.1, 1000.0)
-	proj[1, 1] = -proj[1, 1]
-	return proj
-}
-
-camera_get_vp :: proc(cam: Camera, aspect: f32) -> [16]f32 {
-	view := camera_get_view_matrix(cam)
-	proj := camera_get_projection_matrix(aspect)
-	vp := proj * view
-	return transmute([16]f32)vp
+get_view_proj :: proc(cam: Camera) -> linalg.Matrix4f32 {
+	view := linalg.matrix4_look_at(cam.position, cam.position + cam.forward, cam.up)
+	proj := linalg.matrix4_perspective(cam.fov, cam.aspect, cam.near, cam.far)
+	return linalg.matrix_mul(proj, view)
 }
