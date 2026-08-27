@@ -4,7 +4,6 @@ import "../gpu/gpu"
 
 FLIGHT: u64 : 3
 
-
 Frame_Data :: struct #align (16) {
 	view_proj: matrix[4, 4]f32,
 }
@@ -34,6 +33,7 @@ render_init :: proc(state: ^Render_State) {
 	}
 
 	state.frame_sem = gpu.semaphore_create()
+
 	state.next_frame = 1
 	state.arena_done = {}
 
@@ -44,19 +44,20 @@ render_init :: proc(state: ^Render_State) {
 render_destroy :: proc(state: ^Render_State) {
 	gpu.wait_idle()
 
+	flush_uploads(state)
+
 	for &arena in state.frame_arenas {
 		gpu.arena_destroy(&arena)
 	}
+
 	for block in state.frame_data_blocks {
 		gpu.mem_free_ptr(block)
 	}
 
-	for &upload in state.pending_uploads {
-		gpu.arena_destroy(&upload.arena)
-	}
 	delete(state.pending_uploads)
 
 	gpu.semaphore_destroy(state.frame_sem)
+
 	state^ = {}
 }
 
@@ -64,20 +65,26 @@ acquire_frame_arena :: proc(state: ^Render_State, frame_idx: int) -> ^gpu.Arena 
 	if state.arena_done[frame_idx] > 0 {
 		gpu.semaphore_wait(state.frame_sem, state.arena_done[frame_idx])
 	}
+
 	arena := &state.frame_arenas[frame_idx]
+
 	gpu.arena_free_all(arena)
+
 	return arena
 }
 
 render_geometry :: proc(
 	state: ^Render_State,
-	vertex_data: gpu.gpuptr,
+	draw_data: gpu.gpuptr,
 	geom: ^Geometry,
 	swapchain: gpu.Texture,
 	shaders: Shader_Pair,
 	cmd: gpu.Command_Buffer,
+	instance_count: u32,
 ) {
-	if geom.vertex_count == 0 do return
+	if geom.vertex_count == 0 {
+		return
+	}
 
 	if geom.ready_value != 0 {
 		gpu.cmd_add_wait_semaphore(cmd, state.frame_sem, geom.ready_value)
@@ -92,20 +99,25 @@ render_geometry :: proc(
 		},
 	)
 
-	gpu.cmd_set_raster_state(cmd, gpu.Raster_State{cull_mode = .Cull_CCW})
+	gpu.cmd_set_raster_state(
+		cmd,
+		gpu.Raster_State{topology = .Triangle_List, cull_mode = .Cull_CW},
+	)
+
 	gpu.cmd_set_shaders(cmd, shaders[.Vertex], shaders[.Fragment])
 
 	if geom.index_count > 0 && geom.indices.ptr != nil {
 		gpu.cmd_draw_indexed_raw(
 			cmd,
-			vertex_data,
+			draw_data,
 			gpu.null,
 			geom.indices,
 			geom.index_format,
 			geom.index_count,
+			instance_count,
 		)
 	} else {
-		gpu.cmd_draw(cmd, vertex_data, gpu.null, geom.vertex_count)
+		gpu.cmd_draw(cmd, draw_data, gpu.null, geom.vertex_count, instance_count)
 	}
 
 	gpu.cmd_end_render_pass(cmd)
