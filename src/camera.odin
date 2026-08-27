@@ -1,19 +1,45 @@
-package levi
+package main
 
 import "core:math/linalg"
 
-Camera :: struct {
-	position: linalg.Vector3f32,
-	forward:  linalg.Vector3f32,
-	up:       linalg.Vector3f32,
-	fov:      f32,
-	aspect:   f32,
-	near:     f32,
-	far:      f32,
+Camera_Mode :: union {
+	Orthographic,
+	Perspective,
 }
 
-get_view_proj :: proc(cam: Camera) -> linalg.Matrix4f32 {
-	view := linalg.matrix4_look_at(cam.position, cam.position + cam.forward, cam.up)
-	proj := linalg.matrix4_perspective(cam.fov, cam.aspect, cam.near, cam.far)
-	return linalg.matrix_mul(proj, view)
+Orthographic :: struct {
+	width:  f32,
+	height: f32,
+}
+
+Perspective :: struct {
+	fov: f32,
+}
+
+Camera :: struct {
+	mode:              Camera_Mode,
+	aspect, near, far: f32,
+}
+
+get_view_proj :: proc(cam: Camera, pos: [3]f32, rot: quaternion128) -> matrix[4, 4]f32 {
+	forward := linalg.mul(rot, [3]f32{0, 0, -1})
+	view := linalg.matrix4_look_at(pos, forward, [3]f32{0, 1, 0})
+
+	switch v in cam.mode {
+	case Orthographic:
+		proj := linalg.matrix_ortho3d(
+			-v.width * 0.5,
+			v.width * 0.5,
+			-v.height * 0.5,
+			v.height * 0.5,
+			cam.near,
+			cam.far,
+		)
+		return proj * view
+	case Perspective:
+		proj := linalg.matrix4_perspective(v.fov, cam.aspect, cam.near, cam.far)
+		return proj * view
+	}
+
+	return linalg.MATRIX4F32_IDENTITY
 }

@@ -1,72 +1,51 @@
-// assets/shaders/unlit.slang
 import "../shaders/shared/shared.slang";
 
-static const uint POSITION_BIT = 1u << 0;
-static const uint NORMAL_BIT   = 1u << 1;
-static const uint UV_BIT       = 1u << 2;
-static const uint COLOR_BIT    = 1u << 3;
+enum VertexAttribute {
+  COLOR = 0,
+  COUNT = 1,
+};
+
+struct FrameData {
+  float4x4 view_proj;
+};
 
 struct VertexData {
-  float4x4 viewProj;
-  uint64_t attributes[4];
-  uint attrMask;
+  uint64_t frame_data;
+  uint64_t position;
+  uint64_t attributes[(int)VertexAttribute.COUNT];
 };
 
-struct FragmentData {
-  float4 baseColor;
-};
-
-struct VSInput {
-  uint vertexID : SV_VertexID;
-};
-
-struct VSOutput {
+struct VertexOutput {
   float4 pos : SV_Position;
-  float3 normal : NORMAL;
-  float4 color : COLOR0;
+  float4 color : TEXCOORD0;
 };
 
 [shader("vertex")]
-VSOutput vertMain(VSInput input,
-                  GraphicsPipelineData<VertexData, FragmentData> pipeline) {
-  VSOutput output;
+VertexOutput vertMain(uint vert_id: SV_VertexID,
+                      GraphicsPipelineData<VertexData> data) {
+  VertexOutput o;
+  o.pos = float4(0.0, 0.0, 0.0, 1.0);
+  o.color = float4(1.0, 1.0, 1.0, 1.0);
 
-  float3 *positions = (float3 *)pipeline.vert->attributes[0];
-  float3 pos = positions[input.vertexID];
-  output.pos = mul(pipeline.vert->viewProj, float4(pos, 1.0));
+  if (data.vert.position == 0)
+    return o;
 
-  float3 normal = float3(0.0, 1.0, 0.0);
-  if ((pipeline.vert->attrMask & NORMAL_BIT) != 0) {
-    float3 *normals = (float3 *)pipeline.vert->attributes[1];
-    normal = normals[input.vertexID];
+  float4 *positions = (float4 *)data.vert.position;
+  o.pos = positions[vert_id];
+
+  if (data.vert.frame_data != 0) {
+    FrameData *fd = (FrameData *)data.vert.frame_data;
+    o.pos = mul(fd.view_proj, o.pos);
   }
-  output.normal = normal;
 
-  float4 color = float4(1.0, 1.0, 1.0, 1.0);
-  if ((pipeline.vert->attrMask & COLOR_BIT) != 0) {
-    float4 *colors = (float4 *)pipeline.vert->attributes[3];
-    color = colors[input.vertexID];
+  uint64_t color_addr = data.vert.attributes[(int)VertexAttribute.COLOR];
+  if (color_addr != 0) {
+    float4 *colors = (float4 *)color_addr;
+    o.color = colors[vert_id];
   }
-  output.color = color;
 
-  return output;
+  return o;
 }
-
-struct PSInput {
-  float4 pos : SV_Position;
-  float3 normal : NORMAL;
-  float4 color : COLOR0;
-};
 
 [shader("fragment")]
-float4 fragMain(PSInput input,
-                GraphicsPipelineData<VertexData, FragmentData> pipeline) {
-  if ((pipeline.vert->attrMask & NORMAL_BIT) != 0) {
-    float3 n = normalize(input.normal);
-    return float4(n * 0.5 + 0.5, 1.0);
-  }
-  if ((pipeline.vert->attrMask & COLOR_BIT) != 0) {
-    return input.color;
-  }
-  return pipeline.frag->baseColor;
-}
+float4 fragMain(float4 color: TEXCOORD0) : SV_Target { return color; }
