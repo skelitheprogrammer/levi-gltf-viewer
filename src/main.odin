@@ -23,7 +23,7 @@ main :: proc() {
 	context.logger = logger
 	defer log.destroy_console_logger(logger)
 
-	ok := gpu.init(); ensure(ok, "gpu is not initialized"); defer gpu.cleanup()
+	ok: bool
 
 	ok = sdl.Init({.VIDEO}); ensure(ok, "sdl is not initialized"); defer sdl.Quit()
 
@@ -31,9 +31,13 @@ main :: proc() {
 		"Levi Viewer",
 		SCREEN_WIDTH,
 		SCREEN_HEIGHT,
-		{.VULKAN, .BORDERLESS},
+		{.VULKAN, .RESIZABLE, .HIGH_PIXEL_DENSITY},
 	); ensure(window != nil, "Window creation failed"); defer sdl.DestroyWindow(window)
 
+
+	display_size := sdl.GetWindowDisplayScale(window)
+	win_s := [2]i32{i32(SCREEN_WIDTH * display_size), i32(SCREEN_HEIGHT * display_size)}
+	ok = gpu.init(); ensure(ok, "gpu is not initialized"); defer gpu.cleanup()
 	gpu.swapchain_create_from_sdl(window, u32(levi.FLIGHT))
 
 	state: levi.Render_State
@@ -51,73 +55,69 @@ main :: proc() {
 
 	defer for shader in shaders do gpu.shader_destroy(shader)
 
-	win_w: i32 = SCREEN_WIDTH
-	win_h: i32 = SCREEN_HEIGHT
-	sdl.GetWindowSize(window, &win_w, &win_h)
-	log.info(win_w, win_h)
 
 	cam := Camera {
 		mode = Perspective{fov = linalg.to_radians(f32(45.0))},
-		aspect = f32(win_w) / f32(win_h),
+		aspect = f32(win_s[0]) / f32(win_s[1]),
 		near = 0.1,
 		far = 100.0,
 	}
-
 	cam_pos := [3]f32{0, 0, -3}
 	cam_rot := linalg.QUATERNIONF32_IDENTITY
 
-
 	for {
-		proceed, did_resize := poll_window_events(window, &win_w, &win_h)
+		proceed := poll_window_events(window)
 
-		if !proceed {
-			break
-		}
+		if !proceed do break
 
-		if .MINIMIZED in sdl.GetWindowFlags(window) {
+		frame_idx := state.next_frame % levi.FLIGHT
+
+		handle_window_resize(window, &win_s[0], &win_s[1], frame_idx, state.frame_sem)
+
+		levi.pump_uploads(&state)
+
+
+		if .MINIMIZED in sdl.GetWindowFlags(window) || win_s[0] <= 0 || win_s[1] <= 0 {
 			sdl.Delay(16)
 			continue
 		}
-
-		render_frame(&state, &geom, shaders, cam, cam_pos, cam_rot)
+		render_frame(&state, &geom, shaders, cam, cam_pos, cam_rot, int(frame_idx))
 	}
+	gpu.wait_idle()
 }
 
-poll_window_events :: proc(
-	window: ^sdl.Window,
-	win_w, win_h: ^i32,
-) -> (
-	proceed: bool,
-	did_resize: bool,
-) {
+poll_window_events :: proc(window: ^sdl.Window) -> (proceed: bool) {
 	evt: sdl.Event
 
 	proceed = true
-	did_resize = false
 
 	for sdl.PollEvent(&evt) {
 		#partial switch evt.type {
 		case .QUIT:
 			proceed = false
-
 		case .KEY_DOWN:
-			if evt.key.scancode == .F12 {
-				proceed = false
-			}
-
-		case .WINDOW_RESIZED, .WINDOW_PIXEL_SIZE_CHANGED:
-			old_w := win_w^
-			old_h := win_h^
-
-			sdl.GetWindowSize(window, win_w, win_h)
-
-			if old_w != win_w^ || old_h != win_h^ {
-				did_resize = true
-			}
+			if evt.key.scancode == .F12 do proceed = false
+		case .WINDOW_CLOSE_REQUESTED:
+			if evt.window.windowID == sdl.GetWindowID(window) do proceed = false
 		}
 	}
 
 	return
+}
+
+handle_window_resize :: proc(
+	window: ^sdl.Window,
+	width, height: ^i32,
+	frame_idx: u64,
+	frame_sem: gpu.Semaphore,
+) {
+	old_ws := [2]i32{width^, height^}
+
+	sdl.GetWindowSizeInPixels(window, width, height)
+
+	if frame_idx > levi.FLIGHT do gpu.semaphore_wait(frame_sem, frame_idx - levi.FLIGHT)
+	if old_ws != {width^, height^} do gpu.swapchain_resize({u32(max(0, width^)), u32(max(0, height^))})
+
 }
 
 render_frame :: proc(
@@ -127,12 +127,10 @@ render_frame :: proc(
 	cam: Camera,
 	cam_pos: [3]f32,
 	cam_rot: linalg.Quaternionf32,
+	frame_idx: int,
 ) {
-	levi.pump_uploads(state)
 
 	swapchain := gpu.swapchain_acquire_next()
-
-	frame_idx := int(state.next_frame % levi.FLIGHT)
 
 	arena := levi.acquire_frame_arena(state, frame_idx)
 
@@ -152,14 +150,14 @@ render_frame :: proc(
 
 	draw_data.cpu^ = {}
 
-	draw_data.cpu^.frame_data = u64(uintptr(fd_block.gpu.ptr))
+	draw_data.cpu^.frame_data = fd_block.gpu.ptr
 
-	draw_data.cpu^.instance_data = u64(uintptr(instances.gpu.ptr))
+	draw_data.cpu^.instance_data = instances.gpu.ptr
 
-	draw_data.cpu^.position = u64(uintptr(geometry.position.ptr))
+	draw_data.cpu^.position = geometry.position.ptr
 
 	for attr in levi.Vertex_Attribute {
-		draw_data.cpu^.attributes[attr] = u64(uintptr(geometry.attributes[attr].ptr))
+		draw_data.cpu^.attributes[attr] = geometry.attributes[attr].ptr
 	}
 
 	cmd := gpu.commands_begin(.Main)

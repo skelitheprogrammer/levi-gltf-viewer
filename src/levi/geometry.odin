@@ -9,10 +9,10 @@ Vertex_Attribute :: enum {
 
 
 Draw_Data :: struct #align (16) {
-	frame_data:    u64,
-	instance_data: u64,
-	position:      u64,
-	attributes:    [Vertex_Attribute]u64,
+	frame_data:    rawptr,
+	instance_data: rawptr,
+	position:      rawptr,
+	attributes:    [Vertex_Attribute]rawptr,
 }
 
 Geometry_Stream :: struct {
