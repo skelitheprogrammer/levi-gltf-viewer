@@ -13,42 +13,33 @@ SCREEN_HEIGHT :: 720
 
 INSTANCE_COUNT :: 3
 
+Instance_Data :: struct #align (16) {
+	transform: matrix[4, 4]f32,
+}
+
+
 main :: proc() {
 	logger := log.create_console_logger(.Info)
-
 	context.logger = logger
-
 	defer log.destroy_console_logger(logger)
 
-	ok := gpu.init()
+	ok := gpu.init(); ensure(ok, "gpu is not initialized"); defer gpu.cleanup()
 
-	ensure(ok, "gpu is not initialized")
+	ok = sdl.Init({.VIDEO}); ensure(ok, "sdl is not initialized"); defer sdl.Quit()
 
-	defer gpu.cleanup()
-
-	ok = sdl.Init({.VIDEO})
-
-	ensure(ok, "sdl is not initialized")
-
-	defer sdl.Quit()
-
-	window := sdl.CreateWindow("Levi Viewer", SCREEN_WIDTH, SCREEN_HEIGHT, {.VULKAN, .FULLSCREEN})
-
-	ensure(window != nil, "Window creation failed")
-
-	defer sdl.DestroyWindow(window)
+	window := sdl.CreateWindow(
+		"Levi Viewer",
+		SCREEN_WIDTH,
+		SCREEN_HEIGHT,
+		{.VULKAN, .BORDERLESS},
+	); ensure(window != nil, "Window creation failed"); defer sdl.DestroyWindow(window)
 
 	gpu.swapchain_create_from_sdl(window, u32(levi.FLIGHT))
 
 	state: levi.Render_State
+	levi.render_init(&state); defer levi.render_destroy(&state)
 
-	levi.render_init(&state)
-
-	defer levi.render_destroy(&state)
-
-	geom := upload_triangle_example(&state)
-
-	defer levi.geometry_destroy(&geom)
+	geom := upload_triangle_example(&state); defer levi.geometry_destroy(&geom)
 
 	shaders := levi.Shader_Pair {
 		.Vertex   = gpu.shader_create(#load("../samples/triangle/unlit.vert.spv", []u32), .Vertex),
@@ -58,23 +49,23 @@ main :: proc() {
 		),
 	}
 
-	defer for shader in shaders {
-		gpu.shader_destroy(shader)
-	}
+	defer for shader in shaders do gpu.shader_destroy(shader)
+
+	win_w: i32 = SCREEN_WIDTH
+	win_h: i32 = SCREEN_HEIGHT
+	sdl.GetWindowSize(window, &win_w, &win_h)
+	log.info(win_w, win_h)
 
 	cam := Camera {
 		mode = Perspective{fov = linalg.to_radians(f32(45.0))},
-		aspect = f32(SCREEN_WIDTH) / f32(SCREEN_HEIGHT),
+		aspect = f32(win_w) / f32(win_h),
 		near = 0.1,
 		far = 100.0,
 	}
 
 	cam_pos := [3]f32{0, 0, -3}
-
 	cam_rot := linalg.QUATERNIONF32_IDENTITY
 
-	win_w: i32 = SCREEN_WIDTH
-	win_h: i32 = SCREEN_HEIGHT
 
 	for {
 		proceed, did_resize := poll_window_events(window, &win_w, &win_h)
@@ -85,21 +76,6 @@ main :: proc() {
 
 		if .MINIMIZED in sdl.GetWindowFlags(window) {
 			sdl.Delay(16)
-			continue
-		}
-
-		if win_w <= 0 || win_h <= 0 {
-			sdl.Delay(16)
-			continue
-		}
-
-		if did_resize {
-			gpu.wait_idle()
-
-			gpu.swapchain_resize({u32(win_w), u32(win_h)})
-
-			cam.aspect = f32(win_w) / f32(win_h)
-
 			continue
 		}
 
@@ -164,7 +140,7 @@ render_frame :: proc(
 
 	fd_block.cpu^.view_proj = get_view_proj(cam, cam_pos, cam_rot)
 
-	instances := gpu.arena_alloc_slice(arena, levi.Instance_Data, INSTANCE_COUNT)
+	instances := gpu.arena_alloc_slice(arena, Instance_Data, INSTANCE_COUNT)
 
 	instances.cpu[0].transform = linalg.matrix4_translate([3]f32{-1.5, 0, 0})
 

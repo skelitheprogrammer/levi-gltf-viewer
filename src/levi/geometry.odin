@@ -7,9 +7,6 @@ Vertex_Attribute :: enum {
 	COLOR,
 }
 
-Instance_Data :: struct #align (16) {
-	transform: matrix[4, 4]f32,
-}
 
 Draw_Data :: struct #align (16) {
 	frame_data:    u64,
