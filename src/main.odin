@@ -17,6 +17,11 @@ Instance_Data :: struct #align (16) {
 	transform: matrix[4, 4]f32,
 }
 
+State :: struct {
+	positions: [dynamic][3]f32,
+	rotations: [dynamic]quaternion128,
+	scale:     [dynamic][3]f32,
+}
 
 main :: proc() {
 	logger := log.create_console_logger(.Info)
@@ -54,7 +59,6 @@ main :: proc() {
 	}
 
 	defer for shader in shaders do gpu.shader_destroy(shader)
-
 
 	cam := Camera {
 		mode = Perspective{fov = linalg.to_radians(f32(45.0))},
@@ -148,12 +152,10 @@ render_frame :: proc(
 
 	draw_data := gpu.arena_alloc_ptr(arena, levi.Draw_Data)
 
-	draw_data.cpu^ = {}
+	gpu.mem_free_ptr(draw_data)
 
 	draw_data.cpu^.frame_data = fd_block.gpu.ptr
-
 	draw_data.cpu^.instance_data = instances.gpu.ptr
-
 	draw_data.cpu^.position = geometry.position.ptr
 
 	for attr in levi.Vertex_Attribute {
@@ -205,4 +207,12 @@ upload_triangle_example :: proc(state: ^levi.Render_State) -> levi.Geometry {
 	}
 
 	return levi.upload_geometry(state, desc)
+}
+
+calculate_model :: #force_inline proc "contextless" (
+	pos: [3]f32,
+	rot: quaternion128,
+	scale: [3]f32,
+) -> matrix[4, 4]f32 {
+	return linalg.matrix4_from_trs_f32(pos, rot, scale)
 }
