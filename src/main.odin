@@ -13,9 +13,6 @@ SCREEN_HEIGHT :: 720
 
 INSTANCE_COUNT :: 3
 
-Instance_Data :: struct #align (16) {
-	transform: matrix[4, 4]f32,
-}
 
 State :: struct {
 	positions: [dynamic][3]f32,
@@ -42,13 +39,12 @@ main :: proc() {
 
 	display_size := sdl.GetWindowDisplayScale(window)
 	win_s := [2]i32{i32(SCREEN_WIDTH * display_size), i32(SCREEN_HEIGHT * display_size)}
+
 	ok = gpu.init(); ensure(ok, "gpu is not initialized"); defer gpu.cleanup()
 	gpu.swapchain_create_from_sdl(window, u32(levi.FLIGHT))
 
 	state: levi.Render_State
 	levi.render_init(&state); defer levi.render_destroy(&state)
-
-	geom := upload_triangle_example(&state); defer levi.geometry_destroy(&geom)
 
 	shaders := levi.Shader_Pair {
 		.Vertex   = gpu.shader_create(#load("../samples/triangle/unlit.vert.spv", []u32), .Vertex),
@@ -69,23 +65,24 @@ main :: proc() {
 	cam_pos := [3]f32{0, 0, -3}
 	cam_rot := linalg.QUATERNIONF32_IDENTITY
 
-	for {
-		proceed := poll_window_events(window)
+	pool: levi.Geometry_Pool
+	levi.geometry_pool_init(&pool, {})
 
-		if !proceed do break
+	staging := levi.geometry_begin_upload(&pool)
+	create_triangle(&staging)
+	levi.geometry_submit(&staging)
+
+	for {
+		if !poll_window_events(window) do break
 
 		frame_idx := state.next_frame % levi.FLIGHT
 
 		handle_window_resize(window, &win_s[0], &win_s[1], frame_idx, state.frame_sem)
 
-		levi.pump_uploads(&state)
-
-
 		if .MINIMIZED in sdl.GetWindowFlags(window) || win_s[0] <= 0 || win_s[1] <= 0 {
 			sdl.Delay(16)
 			continue
 		}
-		render_frame(&state, &geom, shaders, cam, cam_pos, cam_rot, int(frame_idx))
 	}
 	gpu.wait_idle()
 }
@@ -124,89 +121,32 @@ handle_window_resize :: proc(
 
 }
 
-render_frame :: proc(
-	state: ^levi.Render_State,
-	geometry: ^levi.Geometry,
-	pair: levi.Shader_Pair,
-	cam: Camera,
-	cam_pos: [3]f32,
-	cam_rot: linalg.Quaternionf32,
-	frame_idx: int,
-) {
 
-	swapchain := gpu.swapchain_acquire_next()
+create_triangle :: proc(staging: ^levi.Geometry_Staging) {
 
-	arena := levi.acquire_frame_arena(state, frame_idx)
+	triangle_pos := [][4]f32{{-1, -1, 0, 1}, {0, 1, 0, 1}, {1, -1, 0, 1}}
+	triangle_colors := [][4]f32{{1, 0, 0, 1}, {0, 1, 0, 1}, {0, 0, 1, 1}}
+	triangle_indices := []u32{0, 1, 2}
 
-	fd_block := state.frame_data_blocks[frame_idx]
-
-	fd_block.cpu^.view_proj = get_view_proj(cam, cam_pos, cam_rot)
-
-	instances := gpu.arena_alloc_slice(arena, Instance_Data, INSTANCE_COUNT)
-
-	instances.cpu[0].transform = linalg.matrix4_translate([3]f32{-1.5, 0, 0})
-
-	instances.cpu[1].transform = linalg.matrix4_translate([3]f32{0, 0, 0})
-
-	instances.cpu[2].transform = linalg.matrix4_translate([3]f32{1.5, 0, 0})
-
-	draw_data := gpu.arena_alloc_ptr(arena, levi.Draw_Data)
-
-	gpu.mem_free_ptr(draw_data)
-
-	draw_data.cpu^.frame_data = fd_block.gpu.ptr
-	draw_data.cpu^.instance_data = instances.gpu.ptr
-	draw_data.cpu^.position = geometry.position.ptr
-
-	for attr in levi.Vertex_Attribute {
-		draw_data.cpu^.attributes[attr] = geometry.attributes[attr].ptr
+	triangle_mat := Unlit_Material {
+		base_color = {1, 0, 0, 1},
 	}
 
-	cmd := gpu.commands_begin(.Main)
+	ptrs := levi.geometry_append(
+		staging,
+		{
+			.Position = levi.Geometry_Stream {
+				data = raw_data(triangle_pos[:]),
+				count = i64(len(triangle_pos)),
+			},
+			.Color = levi.Geometry_Stream {
+				data = raw_data(triangle_colors[:]),
+				count = i64(len(triangle_colors)),
+			},
+		},
+	)
 
-	levi.render_geometry(state, draw_data.gpu, geometry, swapchain, pair, cmd, INSTANCE_COUNT)
-
-	gpu.cmd_add_signal_semaphore(cmd, state.frame_sem, state.next_frame)
-
-	gpu.queue_submit(.Main, {cmd})
-
-	gpu.swapchain_present(.Main, state.frame_sem, state.next_frame)
-
-	state.arena_done[frame_idx] = state.next_frame
-
-	state.next_frame += 1
-}
-
-upload_triangle_example :: proc(state: ^levi.Render_State) -> levi.Geometry {
-	triangle_pos := [?][4]f32{{-1, -1, 0, 1}, {0, 1, 0, 1}, {1, -1, 0, 1}}
-
-	triangle_colors := [?][4]f32{{1, 0, 0, 1}, {0, 1, 0, 1}, {0, 0, 1, 1}}
-
-	triangle_indices := [?]u32{0, 1, 2}
-
-	desc: levi.Geometry_Desc
-
-	desc.index_format = .U32
-
-	desc.positions = {
-		data   = raw_data(triangle_pos[:]),
-		count  = len(triangle_pos),
-		stride = size_of([4]f32),
-	}
-
-	desc.attributes[.COLOR] = {
-		data   = raw_data(triangle_colors[:]),
-		count  = len(triangle_colors),
-		stride = size_of([4]f32),
-	}
-
-	desc.indices = {
-		data   = raw_data(triangle_indices[:]),
-		count  = len(triangle_indices),
-		stride = size_of(u32),
-	}
-
-	return levi.upload_geometry(state, desc)
+	return
 }
 
 calculate_model :: #force_inline proc "contextless" (
