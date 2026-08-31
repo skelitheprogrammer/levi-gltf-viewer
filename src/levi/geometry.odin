@@ -31,9 +31,12 @@ Geometry_Stream :: struct {
 }
 
 geometry_pool_init :: proc(geometry: ^Geometry_Pool, counts: [Vertex_Attribute]i64) {
-	for &pool, type in geometry.pools {
-		pool = gpu.mem_alloc_raw(Vertex_Attribute_Sizes[type], counts[type], 16, GPU)
-	}
+	for &pool, type in geometry.pools do pool = gpu.mem_alloc_raw(Vertex_Attribute_Sizes[type], counts[type], 16, GPU)
+}
+
+geometry_pool_destroy :: proc(pool: ^Geometry_Pool) {
+	for &p in pool.pools do gpu.mem_free_raw(p.gpu)
+	pool^ = {}
 }
 
 Geometry_Staging :: struct {
@@ -64,12 +67,7 @@ geometry_append :: proc(
 		bytes := elem_size * s.count
 		off_bytes := staging.pool.offsets[type]
 
-		dst := gpu.mem_suballoc(
-			staging.pool.pools[type],
-			off_bytes / elem_size,
-			elem_size,
-			s.count,
-		)
+		dst := gpu.mem_suballoc(staging.pool.pools[type], off_bytes, elem_size, s.count)
 
 		st := gpu.arena_alloc_raw(&staging.upload_arena, elem_size, s.count, 16)
 		mem.copy(st.cpu, s.data, int(bytes))

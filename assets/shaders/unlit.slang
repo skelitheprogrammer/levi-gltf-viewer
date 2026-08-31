@@ -26,28 +26,24 @@ struct VertexOutput {
 };
 
 [shader("vertex")]
-VertexOutput vertMain(uint vert_id: SV_VertexID,
+VertexOutput vertMain(uint vertex_id: SV_VertexID,
                       uint instance_id: SV_InstanceID,
                       GraphicsPipelineData<DrawData> data) {
-  VertexOutput o;
+  VertexOutput output;
 
   float4 *positions = (float4 *)data.vert.position;
-
   float4 *colors = (float4 *)data.vert.attributes[(int)VertexAttribute.COLOR];
 
   InstanceData *instances = (InstanceData *)data.vert.instance_data;
-
   FrameData *frame = (FrameData *)data.vert.frame_data;
 
-  float4 local_position = positions[vert_id];
-
+  float4 local_position = positions[vertex_id];
   float4 world_position = mul(instances[instance_id].transform, local_position);
 
-  o.pos = mul(frame.view_proj, world_position);
+  output.pos = mul(frame.view_proj, world_position);
+  output.color = colors[vertex_id];
 
-  o.color = colors[vert_id];
-
-  return o;
+  return output;
 }
 
 [shader("fragment")]

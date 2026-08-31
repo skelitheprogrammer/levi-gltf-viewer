@@ -17,20 +17,28 @@ main :: proc() {
 
 	ok: bool
 
-	ok = sdl.Init({.VIDEO}); ensure(ok, "sdl is not initialized"); defer sdl.Quit()
+	ok = sdl.Init({.VIDEO})
+	ensure(ok, "sdl is not initialized"); log.info("sdl initialized")
+	defer sdl.Quit()
 
 	window := sdl.CreateWindow(
 		"Levi Viewer",
 		SCREEN_WIDTH,
 		SCREEN_HEIGHT,
-		{.VULKAN, .RESIZABLE},
-	); ensure(window != nil, "Window creation failed"); defer sdl.DestroyWindow(window)
+		{.VULKAN, .RESIZABLE, .HIGH_PIXEL_DENSITY},
+	)
+	ensure(window != nil, "Window creation failed"); log.info("sdl window initialized")
+	defer sdl.DestroyWindow(window)
 
 	display_size := sdl.GetWindowDisplayScale(window)
 	win_s := [2]i32{i32(SCREEN_WIDTH * display_size), i32(SCREEN_HEIGHT * display_size)}
 
-	ok = gpu.init(); ensure(ok, "gpu is not initialized"); defer gpu.cleanup()
+	ok = gpu.init()
+	ensure(ok, "gpu is not initialized"); log.info("gpu initialized")
+	defer gpu.cleanup()
+
 	gpu.swapchain_create_from_sdl(window, u32(levi.FLIGHT))
+	log.info("swapchain created")
 
 	state: levi.Render_State
 	levi.render_init(&state); defer levi.render_destroy(&state)
@@ -54,7 +62,9 @@ main :: proc() {
 	cam_rot := linalg.QUATERNIONF32_IDENTITY
 
 	pool: levi.Geometry_Pool
-	levi.geometry_pool_init(&pool, {})
+	levi.geometry_pool_init(&pool, {.Position = 6, .Color = 6})
+	log.info("pool initialized")
+	defer levi.geometry_pool_destroy(&pool)
 
 	meshes: [2]levi.Mesh
 
@@ -63,7 +73,6 @@ main :: proc() {
 	meshes[1] = create_triangle_2(&staging)
 	levi.geometry_submit(&staging)
 
-	// 2 instances of mesh 0 on the left, 3 of mesh 1 on the right
 	draws: [dynamic]levi.Draw
 	defer delete(draws)
 	{
@@ -119,7 +128,6 @@ draw :: proc(
 	view_proj: matrix[4, 4]f32,
 	win_size: [2]i32,
 ) {
-	// don't overwrite an in-flight frame before reusing its arena
 	if state.next_frame > levi.FLIGHT do gpu.semaphore_wait(state.frame_sem, state.next_frame - levi.FLIGHT)
 
 	swapchain := gpu.swapchain_acquire_next()
@@ -131,7 +139,6 @@ draw :: proc(
 		view_proj = view_proj,
 	}
 
-	// group instances by mesh so each mesh's run is contiguous (one instanced draw per run)
 
 	inst := gpu.arena_alloc(arena, levi.Instance_Data, len(draws))
 	insts := inst.cpu[:len(draws)]
@@ -172,6 +179,7 @@ draw :: proc(
 	gpu.cmd_end_render_pass(cmd)
 	gpu.cmd_add_signal_semaphore(cmd, state.frame_sem, state.next_frame)
 	gpu.queue_submit(.Main, {cmd})
+	gpu.swapchain_present(.Main, state.frame_sem, state.next_frame)
 }
 
 poll_window_events :: proc(window: ^sdl.Window) -> (proceed: bool) {
@@ -204,7 +212,7 @@ handle_window_resize :: proc(
 	sdl.GetWindowSizeInPixels(window, width, height)
 
 	if frame_idx > levi.FLIGHT do gpu.semaphore_wait(frame_sem, frame_idx - levi.FLIGHT)
-	if old_ws != {width^, height^} do gpu.swapchain_resize({u32(max(0, width^)), u32(max(0, height^))})
+	if old_ws != {width^, height^} do gpu.swapchain_resize({u32(width^), u32(height^)})
 }
 
 create_triangle_1 :: proc(staging: ^levi.Geometry_Staging) -> levi.Mesh {
