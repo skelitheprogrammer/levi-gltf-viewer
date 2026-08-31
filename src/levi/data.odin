@@ -24,9 +24,9 @@ Unlit_Vertex_Mapping :: [Unlit_Vertex_Layout]Vertex_Attribute {
 }
 
 Unlit_Vertex_Root :: struct #align (16) {
-	streams:   [Unlit_Vertex_Layout]rawptr,
-	instances: rawptr,
 	frame:     rawptr,
+	instances: rawptr,
+	streams:   [Unlit_Vertex_Layout]rawptr,
 }
 
 Unlit_Pixel_Root :: struct #align (16) {

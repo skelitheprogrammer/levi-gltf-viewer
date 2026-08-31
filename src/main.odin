@@ -155,7 +155,7 @@ draw :: proc(
 	gpu.cmd_set_viewport(cmd, {size = {f32(win_size[0]), f32(win_size[1])}, depth_max = 1})
 	gpu.cmd_set_scissor(cmd, {size = {u32(win_size[0]), u32(win_size[1])}})
 	gpu.cmd_set_shaders(cmd, pair[.Vertex], pair[.Fragment])
-	gpu.cmd_set_raster_state(cmd, {topology = .Triangle_List, cull_mode = .Cull_CW})
+	gpu.cmd_set_raster_state(cmd, {topology = .Triangle_List, cull_mode = .None})
 
 	i := 0
 	for i < len(draws) {
