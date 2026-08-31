@@ -15,6 +15,11 @@ Vertex_Attribute_Sizes := [Vertex_Attribute]i64 {
 	.Color    = size_of([4]f32),
 }
 
+Mesh :: struct {
+	streams:      [Vertex_Attribute]gpu.gpuptr,
+	vertex_count: u32,
+}
+
 Geometry_Pool :: struct {
 	pools:   [Vertex_Attribute]gpu.ptr,
 	offsets: [Vertex_Attribute]i64,
@@ -51,7 +56,6 @@ geometry_append :: proc(
 ) -> (
 	result: [Vertex_Attribute]gpu.gpuptr,
 ) {
-
 	for stream, type in data {
 		if stream == nil do continue
 		s := stream.?

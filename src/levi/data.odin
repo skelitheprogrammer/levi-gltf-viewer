@@ -1,6 +1,5 @@
-package main
+package levi
 
-import "levi"
 
 Instance_Data :: struct #align (16) {
 	model: matrix[4, 4]f32,
@@ -19,7 +18,7 @@ Unlit_Vertex_Layout :: enum {
 	Color,
 }
 
-Unlit_Vertex_Mapping :: [Unlit_Vertex_Layout]levi.Vertex_Attribute {
+Unlit_Vertex_Mapping :: [Unlit_Vertex_Layout]Vertex_Attribute {
 	.Position = .Position,
 	.Color    = .Color,
 }
