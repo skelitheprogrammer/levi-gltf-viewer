@@ -23,8 +23,13 @@ Camera :: struct {
 
 get_view_proj :: proc(cam: Camera, pos: [3]f32, rot: linalg.Quaternionf32) -> matrix[4, 4]f32 {
 	forward := linalg.mul(rot, [3]f32{0, 0, 1})
-
 	view := linalg.matrix4_look_at(pos, pos + forward, [3]f32{0, 1, 0}, false)
+
+	// Vulkan requires depth in [0, 1], but linalg produces [-1, 1].
+	// This bias maps Z_vk = Z_gl * 0.5 + 0.5
+	bias: matrix[4, 4]f32 = linalg.MATRIX4F32_IDENTITY
+	bias[2][2] = 0.5
+	bias[3][2] = 0.5
 
 	switch v in cam.mode {
 	case Orthographic:
@@ -37,17 +42,15 @@ get_view_proj :: proc(cam: Camera, pos: [3]f32, rot: linalg.Quaternionf32) -> ma
 			cam.far,
 			false,
 		)
+		proj[1][1] *= -1 // Y-flip for Vulkan
 
-		proj[1][1] *= -1
-
-		return proj * view
+		return bias * proj * view
 
 	case Perspective:
 		proj := linalg.matrix4_perspective(v.fov, cam.aspect, cam.near, cam.far, false)
+		proj[1][1] *= -1 // Y-flip for Vulkan
 
-		proj[1][1] *= -1
-
-		return proj * view
+		return bias * proj * view
 	}
 
 	return linalg.MATRIX4F32_IDENTITY

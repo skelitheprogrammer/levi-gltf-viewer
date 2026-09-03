@@ -21,7 +21,7 @@ Renderer :: struct {
 Engine :: struct {
 	state:     Render_State,
 	renderer:  Renderer,
-	window:    rawptr,
+	window:    ^sdl3.Window,
 	win_s:     [2]i32,
 	extract:   Extract_Fn,
 	user_data: rawptr,
@@ -120,21 +120,21 @@ draw :: proc(eng: ^Engine, frame_data: ^Frame_Data) {
 			size_of(Material_Params) * instance_count,
 		)
 
-		staging_cmds := gpu.arena_alloc(
-			frame_arena,
-			gpu.Draw_Indexed_Indirect_Command,
-			instance_count,
-		)
+		// Generate unified Indirect_Draw structs (command + per-draw data)
+		staging_cmds := gpu.arena_alloc(frame_arena, Indirect_Draw, instance_count)
 		staging_count := gpu.arena_alloc(frame_arena, u32, 1)
 
 		for i in 0 ..< instance_count {
 			mesh := eng.renderer.meshes[eng.renderer.instances[i].mesh_id]
-			staging_cmds.cpu[i] = gpu.Draw_Indexed_Indirect_Command {
-				index_count    = mesh.index_count,
-				instance_count = 1,
-				first_index    = mesh.index_offset,
-				vertex_offset  = i32(mesh.pos_offset),
-				first_instance = u32(i),
+			staging_cmds.cpu[i] = Indirect_Draw {
+				cmd = gpu.Draw_Indexed_Indirect_Command {
+					index_count = mesh.index_count,
+					instance_count = 1,
+					first_index = mesh.index_offset,
+					vertex_offset = i32(mesh.pos_offset),
+					first_instance = 0,
+				},
+				data = Per_Draw_Data{instance_index = u32(i)},
 			}
 		}
 		staging_count.cpu[0] = u32(instance_count)
@@ -143,7 +143,7 @@ draw :: proc(eng: ^Engine, frame_data: ^Frame_Data) {
 			cmd_buf,
 			eng.renderer.streams[.Indirect_Commands],
 			staging_cmds.gpu,
-			size_of(gpu.Draw_Indexed_Indirect_Command) * instance_count,
+			size_of(Indirect_Draw) * instance_count,
 		)
 		gpu.cmd_mem_copy_raw(
 			cmd_buf,
@@ -162,7 +162,6 @@ draw :: proc(eng: ^Engine, frame_data: ^Frame_Data) {
 		size_of(Frame_Data),
 	)
 
-	// CRITICAL: Synchronize Transfer writes with Draw Indirect / Vertex Shader reads
 	gpu.cmd_barrier(cmd_buf, .Transfer, .All, {})
 
 	ctx := Render_Context {

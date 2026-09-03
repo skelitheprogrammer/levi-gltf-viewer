@@ -35,6 +35,15 @@ Frame_Data :: struct #align (16) {
 	view_proj: [16]f32,
 }
 
+Per_Draw_Data :: struct #align (4) {
+	instance_index: u32,
+}
+
+Indirect_Draw :: struct {
+	using cmd: gpu.Draw_Indexed_Indirect_Command,
+	data:      Per_Draw_Data,
+}
+
 Vertex_Root :: struct {
 	attributes:      [Vertex_Attribute]rawptr,
 	instances:       rawptr,
@@ -103,7 +112,7 @@ Stream_Element_Size: [Stream_Attribute]i64 = {
 	.Instances              = size_of(Instance_Data),
 	.Material_Params_Stream = size_of(Material_Params),
 	.Frame_Data_Stream      = size_of(Frame_Data),
-	.Indirect_Commands      = size_of(gpu.Draw_Indexed_Indirect_Command),
+	.Indirect_Commands      = size_of(Indirect_Draw),
 	.Draw_Count             = size_of(u32),
 }
 

@@ -2,14 +2,14 @@ package main
 
 import gpu "../src/gpu/gpu"
 import levi "../src/levi"
-import intr "base:intrinsics"
+import "base:intrinsics"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:mem"
 import sdl "vendor:sdl3"
 
-// USER: Define your own application data structures
+
 My_Instance :: struct {
 	pos:   [3]f32,
 	color: [4]f32,
@@ -19,21 +19,16 @@ App_State :: struct {
 	instances: [dynamic]My_Instance,
 }
 
-// USER: Implement extraction - you handle the math
 extract :: proc(id: levi.Instance_ID, user_data: rawptr) -> levi.Extract_Result {
 	state := cast(^App_State)user_data
 	inst := state.instances[id]
-
-	// USER: Calculate your own transform matrix
 	mat4 := linalg.matrix4_from_trs_f32(inst.pos, linalg.QUATERNIONF32_IDENTITY, {1, 1, 1})
-
 	return levi.Extract_Result {
-		transform = intr.matrix_flatten(mat4),
+		transform = transmute([16]f32)mat4,
 		params = levi.Material_Params{base_color = inst.color, emissive = {0, 0, 0, 0}},
 	}
 }
 
-// USER: Define your own render pass
 my_opaque_pass :: proc(ctx: ^levi.Render_Context) {
 	r := ctx.renderer
 	if len(r.instances) == 0 do return
@@ -66,14 +61,13 @@ my_opaque_pass :: proc(ctx: ^levi.Render_Context) {
 		r.streams[.Indices],
 		.U32,
 		r.streams[.Indirect_Commands],
-		u32(size_of(gpu.Draw_Indexed_Indirect_Command)),
+		u32(size_of(levi.Indirect_Draw)),
 		r.streams[.Draw_Count],
 	)
 
 	gpu.cmd_end_render_pass(ctx.cmd_buf)
 }
 
-// USER: Create your own mesh content
 create_quad :: proc(eng: ^levi.Engine) -> levi.Mesh_ID {
 	pos := make([][4]f32, 4)
 	pos[0] = {-0.5, -0.5, 0, 1}; pos[1] = {0.5, -0.5, 0, 1}
@@ -98,20 +92,6 @@ create_quad :: proc(eng: ^levi.Engine) -> levi.Mesh_ID {
 	)
 }
 
-// USER: Calculate your own view-projection matrix
-calculate_view_proj :: proc(eye, target, up: [3]f32, fov, aspect, near, far: f32) -> [16]f32 {
-	view := linalg.matrix4_look_at_f32(eye, target, up, false)
-	proj := linalg.matrix4_perspective_f32(math.RAD_PER_DEG * fov, aspect, near, far, false)
-
-	// Apply Vulkan depth bias [0, 1]
-	bias: matrix[4, 4]f32 = linalg.MATRIX4F32_IDENTITY
-	bias[2][2] = 0.5
-	bias[2][3] = 0.5
-	proj = proj * bias
-
-	vp := proj * view
-	return intr.matrix_flatten(vp)
-}
 
 main :: proc() {
 	logger := log.create_console_logger(.Info)
@@ -142,16 +122,23 @@ main :: proc() {
 	mesh := create_quad(eng)
 
 	levi.spawn_instance(eng, mesh, mat)
-	append(&app.instances, My_Instance{pos = {0, 0, 0}, color = {1, 0, 0, 1}})
+	append(&app.instances, My_Instance{pos = {1, 0, 0}, color = {1, 0, 0, 1}})
 
 	levi.spawn_instance(eng, mesh, mat)
-	append(&app.instances, My_Instance{pos = {0.5, 0, 0}, color = {0, 1, 0, 1}})
+	append(&app.instances, My_Instance{pos = {-1, 0, 0}, color = {0, 1, 0, 1}})
 
 	eng.extract = extract
 	eng.user_data = &app
 	append(&eng.passes, my_opaque_pass)
 
 	frame_data: levi.Frame_Data
+
+	cam := Camera {
+		mode   = Perspective{linalg.to_radians(f32(60))},
+		aspect = f32(eng.win_s[0]) / f32(eng.win_s[1]),
+	}
+	cam_pos := [3]f32{0, 0, -3}
+	cam_rot := linalg.QUATERNIONF32_IDENTITY
 
 	for {
 		if !poll_window_events(window) do break
@@ -162,16 +149,9 @@ main :: proc() {
 
 		if eng.win_s[0] == 0 || eng.win_s[1] == 0 do continue
 
-		aspect := f32(eng.win_s[0]) / f32(eng.win_s[1])
-		frame_data.view_proj = calculate_view_proj(
-			{0, 0, -3},
-			{0, 0, 0},
-			{0, 1, 0},
-			45.0,
-			aspect,
-			0.1,
-			100.0,
-		)
+		cam.aspect = f32(eng.win_s[0]) / f32(eng.win_s[1])
+
+		frame_data.view_proj = intrinsics.matrix_flatten(get_view_proj(cam, cam_pos, cam_rot))
 
 		levi.draw(eng, &frame_data)
 	}
@@ -191,4 +171,44 @@ poll_window_events :: proc(window: ^sdl.Window) -> (proceed: bool) {
 		}
 	}
 	return
+}
+
+example_opaque_pass :: proc(ctx: ^levi.Render_Context) {
+	r := ctx.renderer
+	if len(r.instances) == 0 do return
+
+	mat_id := r.instances[0].material_id
+	mat := r.materials[mat_id]
+	gpu.cmd_set_shaders(ctx.cmd_buf, r.shaders[mat.vert], r.shaders[mat.frag])
+	gpu.cmd_set_raster_state(
+		ctx.cmd_buf,
+		gpu.Raster_State{topology = .Triangle_List, cull_mode = .None},
+	)
+
+	root := gpu.arena_alloc(ctx.frame_arena, levi.Vertex_Root)
+	for attr in levi.Vertex_Attribute {
+		root.cpu.attributes[attr] = r.streams[levi.Stream_Attribute(attr)].ptr
+	}
+	root.cpu.instances = r.streams[.Instances].ptr
+	root.cpu.material_params = r.streams[.Material_Params_Stream].ptr
+	root.cpu.frame_data = r.streams[.Frame_Data_Stream].ptr
+
+	gpu.cmd_begin_render_pass(
+		ctx.cmd_buf,
+		{color_attachments = {{texture = ctx.target, clear_color = {0.15, 0.15, 0.15, 1.0}}}},
+	)
+
+	// Stride is now size_of(Indirect_Draw) to match the unified struct
+	gpu.cmd_draw_indexed_indirect_multi_raw(
+		ctx.cmd_buf,
+		root.gpu,
+		{},
+		r.streams[.Indices],
+		.U32,
+		r.streams[.Indirect_Commands],
+		u32(size_of(levi.Indirect_Draw)),
+		r.streams[.Draw_Count],
+	)
+
+	gpu.cmd_end_render_pass(ctx.cmd_buf)
 }
