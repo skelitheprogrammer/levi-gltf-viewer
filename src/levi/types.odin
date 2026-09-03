@@ -21,9 +21,10 @@ Vertex_Attribute :: enum {
 }
 
 Instance_Data :: struct #align (16) {
-	mesh_id:     Mesh_ID,
-	material_id: Material_ID,
-	transform:   [16]f32,
+	mesh_id:      Mesh_ID,
+	material_id:  Material_ID,
+	_pad0, _pad1: u32, // <--- CRITICAL FIX: Forces transform to offset 16
+	transform:    [16]f32,
 }
 
 Material_Params :: struct #align (16) {
