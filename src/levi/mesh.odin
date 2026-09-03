@@ -13,7 +13,6 @@ create_mesh :: proc(eng: ^Engine, desc: Mesh_Desc) -> Mesh_ID {
 	vertex_count := u32(0)
 
 	for attr in Vertex_Attribute {
-		if attr == .COUNT do continue
 		data := desc.attributes[attr]
 		if len(data) > 0 {
 			stream_attr := Stream_Attribute(attr)

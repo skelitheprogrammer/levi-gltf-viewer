@@ -13,18 +13,17 @@ INVALID_MATERIAL_ID :: Material_ID(~u32(0))
 INVALID_SHADER_ID :: Shader_ID(~u32(0))
 INVALID_INSTANCE_ID :: Instance_ID(~u32(0))
 
+// FIX: Removed COUNT. Odin arrays [Vertex_Attribute]T now have exactly 4 elements.
 Vertex_Attribute :: enum {
 	Position,
 	Color,
 	Normal,
 	UV0,
-	COUNT,
 }
 
-// GPU-ready per-instance data
 Instance_Data :: struct #align (16) {
 	mesh_id:     Mesh_ID,
-	material_id: Material_ID, // Fixed: Store the actual Material_ID
+	material_id: Material_ID,
 	_pad:        [2]u32,
 	transform:   matrix[4, 4]f32,
 }

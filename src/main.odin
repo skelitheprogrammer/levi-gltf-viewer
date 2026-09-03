@@ -26,7 +26,7 @@ extract :: proc(id: levi.Instance_ID, user_data: rawptr) -> levi.Extract_Result 
 		transform = linalg.matrix4_from_trs_f32(
 			inst.pos,
 			linalg.QUATERNIONF32_IDENTITY,
-			{0.5, 0.5, 0.5},
+			{1, 1, 1},
 		),
 		params = levi.Material_Params{base_color = inst.color, emissive = {0, 0, 0, 0}},
 	}
@@ -36,14 +36,16 @@ opaque_pass :: proc(ctx: ^levi.Render_Context) {
 	r := ctx.renderer
 	if len(r.instances) == 0 do return
 
-	// Bind shaders from the first instance's material
 	mat_id := r.instances[0].material_id
 	mat := r.materials[mat_id]
 	gpu.cmd_set_shaders(ctx.cmd_buf, r.shaders[mat.vert], r.shaders[mat.frag])
+	gpu.cmd_set_raster_state(
+		ctx.cmd_buf,
+		gpu.Raster_State{topology = .Triangle_List, cull_mode = .Cull_CCW},
+	)
 
 	root := gpu.arena_alloc(ctx.frame_arena, levi.Vertex_Root)
 	for attr in levi.Vertex_Attribute {
-		if attr == .COUNT do continue
 		root.cpu.attributes[attr] = r.streams[levi.Stream_Attribute(attr)].ptr
 	}
 	root.cpu.instances = r.streams[.Instances].ptr
@@ -105,13 +107,11 @@ main :: proc() {
 	)
 	mesh := levi.create_mesh(eng, levi.generate_quad_mesh())
 
-	{
-		levi.spawn_instance(eng, mesh, app.mat)
-		append(&app.instances, My_Instance{pos = {-1, 0, 0}, color = {1, 0, 0, 1}})
+	levi.spawn_instance(eng, mesh, app.mat)
+	append(&app.instances, My_Instance{pos = {-1, 0, 0}, color = {1, 0, 0, 1}})
 
-		levi.spawn_instance(eng, mesh, app.mat)
-		append(&app.instances, My_Instance{pos = {1, 0, 0}, color = {0, 1, 0, 1}})
-	}
+	levi.spawn_instance(eng, mesh, app.mat)
+	append(&app.instances, My_Instance{pos = {1, 0, 0}, color = {0, 1, 0, 1}})
 
 	eng.extract = extract
 	eng.user_data = &app
@@ -121,6 +121,12 @@ main :: proc() {
 
 	for {
 		if !poll_window_events(window) do break
+
+		w, h: i32
+		sdl.GetWindowSizeInPixels(window, &w, &h)
+		eng.win_s = {w, h}
+
+		if eng.win_s[0] == 0 || eng.win_s[1] == 0 do continue
 
 		for &inst in app.instances {
 			inst.pos[1] += 0.001
