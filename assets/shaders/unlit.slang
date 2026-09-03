@@ -14,8 +14,6 @@ struct FrameData {
 struct InstanceData {
   uint mesh_id;
   uint material_instance;
-  uint _pad0;
-  uint _pad1;
   float4x4 transform;
 };
 
@@ -25,8 +23,7 @@ struct MaterialParams {
 };
 
 struct DrawData {
-  // FIX: Hardcoded to 4 to match Odin's [Vertex_Attribute]rawptr array size
-  uint64_t attributes[4]; 
+  uint64_t attributes[4];
   uint64_t instances;
   uint64_t material_params;
   uint64_t frame_data;
@@ -43,23 +40,25 @@ VertexOutput vertMain(uint vertex_id: SV_VertexID,
                       GraphicsPipelineData<DrawData> data) {
   VertexOutput output;
 
-  float3 *positions = (float3 *)data.vert.attributes[(int)VertexAttribute.POSITION];
-  float4 *colors    = (float4 *)data.vert.attributes[(int)VertexAttribute.COLOR];
+  float4 *positions =
+      (float4 *)data.vert.attributes[(int)VertexAttribute.POSITION];
+  float4 *colors = (float4 *)data.vert.attributes[(int)VertexAttribute.COLOR];
 
-  InstanceData *instances    = (InstanceData *)data.vert.instances;
+  InstanceData *instances = (InstanceData *)data.vert.instances;
   MaterialParams *mat_params = (MaterialParams *)data.vert.material_params;
-  FrameData *frame           = (FrameData *)data.vert.frame_data;
+  FrameData *frame = (FrameData *)data.vert.frame_data;
 
-  float3 local_pos = positions[vertex_id];
-  float4 world_pos = mul(instances[instance_id].transform, float4(local_pos, 1.0));
+  float4 local_pos = positions[vertex_id];
 
-  output.pos   = mul(frame.view_proj, world_pos);
+  // Standard column-vector multiplication (matches Odin's column-major storage)
+  float4 world_pos = mul(instances[instance_id].transform, local_pos);
+  float4 clip_pos = mul(frame.view_proj, world_pos);
+
+  output.pos = clip_pos;
   output.color = colors[vertex_id] * mat_params[instance_id].base_color;
 
   return output;
 }
 
 [shader("fragment")]
-float4 fragMain(VertexOutput input) : SV_Target {
-  return input.color;
-}
+float4 fragMain(VertexOutput input) : SV_Target { return input.color; }

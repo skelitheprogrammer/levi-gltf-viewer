@@ -63,7 +63,9 @@ generate_quad_mesh :: proc() -> Mesh_Desc {
 	for i in 0 ..< 4 do col[i] = {1, 1, 1, 1}
 
 	idx := make([]u32, 6)
-	idx[0] = 0; idx[1] = 1; idx[2] = 2; idx[3] = 0; idx[4] = 2; idx[5] = 3
+	// FIX: Reversed winding (CW in clip space → CCW in framebuffer space)
+	idx[0] = 0; idx[1] = 2; idx[2] = 1
+	idx[3] = 0; idx[4] = 3; idx[5] = 2
 
 	return Mesh_Desc {
 		attributes = #partial{

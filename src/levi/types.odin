@@ -13,7 +13,6 @@ INVALID_MATERIAL_ID :: Material_ID(~u32(0))
 INVALID_SHADER_ID :: Shader_ID(~u32(0))
 INVALID_INSTANCE_ID :: Instance_ID(~u32(0))
 
-// FIX: Removed COUNT. Odin arrays [Vertex_Attribute]T now have exactly 4 elements.
 Vertex_Attribute :: enum {
 	Position,
 	Color,
@@ -24,8 +23,7 @@ Vertex_Attribute :: enum {
 Instance_Data :: struct #align (16) {
 	mesh_id:     Mesh_ID,
 	material_id: Material_ID,
-	_pad:        [2]u32,
-	transform:   matrix[4, 4]f32,
+	transform:   [16]f32,
 }
 
 Material_Params :: struct #align (16) {
@@ -34,7 +32,7 @@ Material_Params :: struct #align (16) {
 }
 
 Frame_Data :: struct #align (16) {
-	view_proj: matrix[4, 4]f32,
+	view_proj: [16]f32,
 }
 
 Vertex_Root :: struct {
@@ -65,7 +63,7 @@ Material_Template :: struct {
 }
 
 Extract_Result :: struct {
-	transform: matrix[4, 4]f32,
+	transform: [16]f32,
 	params:    Material_Params,
 }
 
@@ -96,7 +94,7 @@ Stream_Attribute :: enum {
 
 @(rodata)
 Stream_Element_Size: [Stream_Attribute]i64 = {
-	.Position               = size_of([3]f32),
+	.Position               = size_of([4]f32),
 	.Color                  = size_of([4]f32),
 	.Normal                 = size_of([3]f32),
 	.UV0                    = size_of([2]f32),

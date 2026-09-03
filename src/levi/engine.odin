@@ -1,6 +1,7 @@
 package levi
 
 import "../gpu/gpu"
+import "core:log"
 import "vendor:sdl3"
 
 Render_State :: struct {
@@ -102,6 +103,7 @@ draw :: proc(eng: ^Engine, frame_data: ^Frame_Data) {
 
 		for i in 0 ..< instance_count {
 			result := eng.extract(Instance_ID(i), eng.user_data)
+			log.info(result)
 			inst := eng.renderer.instances[i]
 			inst.transform = result.transform
 			staging_inst.cpu[i] = inst
