@@ -4,189 +4,141 @@ import gpu "../src/gpu/gpu"
 import levi "../src/levi"
 import "core:log"
 import "core:math/linalg"
-
 import sdl "vendor:sdl3"
 
-SCREEN_WIDTH :: 1280
-SCREEN_HEIGHT :: 720
+My_Instance :: struct {
+	pos:   [3]f32,
+	vel:   [3]f32,
+	color: [4]f32,
+}
+
+App_State :: struct {
+	instances: [dynamic]My_Instance,
+	vert:      levi.Shader_ID,
+	frag:      levi.Shader_ID,
+	mat:       levi.Material_ID,
+}
+
+extract :: proc(id: levi.Instance_ID, user_data: rawptr) -> levi.Extract_Result {
+	state := cast(^App_State)user_data
+	inst := state.instances[id]
+	return levi.Extract_Result {
+		transform = linalg.matrix4_from_trs_f32(
+			inst.pos,
+			linalg.QUATERNIONF32_IDENTITY,
+			{0.5, 0.5, 0.5},
+		),
+		params = levi.Material_Params{base_color = inst.color, emissive = {0, 0, 0, 0}},
+	}
+}
+
+opaque_pass :: proc(ctx: ^levi.Render_Context) {
+	r := ctx.renderer
+	if len(r.instances) == 0 do return
+
+	// Bind shaders from the first instance's material
+	mat_id := r.instances[0].material_id
+	mat := r.materials[mat_id]
+	gpu.cmd_set_shaders(ctx.cmd_buf, r.shaders[mat.vert], r.shaders[mat.frag])
+
+	root := gpu.arena_alloc(ctx.frame_arena, levi.Vertex_Root)
+	for attr in levi.Vertex_Attribute {
+		if attr == .COUNT do continue
+		root.cpu.attributes[attr] = r.streams[levi.Stream_Attribute(attr)].ptr
+	}
+	root.cpu.instances = r.streams[.Instances].ptr
+	root.cpu.material_params = r.streams[.Material_Params_Stream].ptr
+	root.cpu.frame_data = r.streams[.Frame_Data_Stream].ptr
+
+	gpu.cmd_begin_render_pass(
+		ctx.cmd_buf,
+		{color_attachments = {{texture = ctx.target, clear_color = {0.15, 0.15, 0.15, 1.0}}}},
+	)
+
+	gpu.cmd_draw_indexed_indirect_multi_raw(
+		ctx.cmd_buf,
+		root.gpu,
+		{},
+		r.streams[.Indices],
+		.U32,
+		r.streams[.Indirect_Commands],
+		u32(size_of(gpu.Draw_Indexed_Indirect_Command)),
+		r.streams[.Draw_Count],
+	)
+
+	gpu.cmd_end_render_pass(ctx.cmd_buf)
+}
 
 main :: proc() {
 	logger := log.create_console_logger(.Info)
 	context.logger = logger
 	defer log.destroy_console_logger(logger)
 
-	ok: bool
-
-	ok = sdl.Init({.VIDEO})
+	ok := sdl.Init({.VIDEO})
 	ensure(ok, "sdl is not initialized"); log.info("sdl initialized")
 	defer sdl.Quit()
 
 	window := sdl.CreateWindow(
 		"Levi Viewer",
-		SCREEN_WIDTH,
-		SCREEN_HEIGHT,
+		1280,
+		720,
 		{.VULKAN, .RESIZABLE, .HIGH_PIXEL_DENSITY},
 	)
 	ensure(window != nil, "Window creation failed"); log.info("sdl window initialized")
 	defer sdl.DestroyWindow(window)
 
-	display_size := sdl.GetWindowDisplayScale(window)
-	win_s := [2]i32{i32(SCREEN_WIDTH * display_size), i32(SCREEN_HEIGHT * display_size)}
+	eng := levi.engine_init(window, 1280, 720)
+	defer levi.engine_destroy(eng)
 
-	ok = gpu.init()
-	ensure(ok, "gpu is not initialized"); log.info("gpu initialized")
-	defer gpu.cleanup()
+	app: App_State
+	app.vert = levi.create_shader(eng, #load("../samples/triangle/unlit.vert.spv", []u32), .Vertex)
+	app.frag = levi.create_shader(
+		eng,
+		#load("../samples/triangle/unlit.frag.spv", []u32),
+		.Fragment,
+	)
+	app.mat = levi.create_material(
+		eng,
+		app.vert,
+		app.frag,
+		params_size = size_of(levi.Material_Params),
+	)
+	mesh := levi.create_mesh(eng, levi.generate_quad_mesh())
 
-	gpu.swapchain_create_from_sdl(window, u32(levi.FLIGHT))
-	log.info("swapchain created")
-
-	state: levi.Render_State
-	levi.render_init(&state); defer levi.render_destroy(&state)
-
-	shaders := levi.Shader_Pair {
-		.Vertex   = gpu.shader_create(#load("../samples/triangle/unlit.vert.spv", []u32), .Vertex),
-		.Fragment = gpu.shader_create(
-			#load("../samples/triangle/unlit.frag.spv", []u32),
-			.Fragment,
-		),
-	}
-	defer for shader in shaders do gpu.shader_destroy(shader)
-
-	cam := Camera {
-		mode = Perspective{fov = linalg.to_radians(f32(45.0))},
-		aspect = f32(win_s[0]) / f32(win_s[1]),
-		near = 0.1,
-		far = 100.0,
-	}
-	cam_pos := [3]f32{0, 0, -3}
-	cam_rot := linalg.QUATERNIONF32_IDENTITY
-
-	pool: levi.Geometry_Pool
-	levi.geometry_pool_init(&pool, {.Position = 6, .Color = 6})
-	log.info("pool initialized")
-	defer levi.geometry_pool_destroy(&pool)
-
-	meshes: [2]levi.Mesh
-
-	staging := levi.geometry_begin_upload(&pool)
-	meshes[0] = create_triangle_1(&staging)
-	meshes[1] = create_triangle_2(&staging)
-	levi.geometry_submit(&staging)
-
-	draws: [dynamic]levi.Draw
-	defer delete(draws)
 	{
-		id := linalg.QUATERNIONF32_IDENTITY
-		for i in 0 ..< 2 {
-			append(
-				&draws,
-				levi.Draw {
-					mesh = 0,
-					model = calculate_model({-1.5, f32(i) * 0.8 - 0.4, 0}, id, {0.35, 0.35, 0.35}),
-				},
-			)
-		}
-		for i in 0 ..< 3 {
-			append(
-				&draws,
-				levi.Draw {
-					mesh = 1,
-					model = calculate_model({1.5, f32(i) * 0.8 - 0.8, 0}, id, {0.35, 0.35, 0.35}),
-				},
-			)
-		}
+		levi.spawn_instance(eng, mesh, app.mat)
+		append(&app.instances, My_Instance{pos = {-1, 0, 0}, color = {1, 0, 0, 1}})
+
+		levi.spawn_instance(eng, mesh, app.mat)
+		append(&app.instances, My_Instance{pos = {1, 0, 0}, color = {0, 1, 0, 1}})
 	}
+
+	eng.extract = extract
+	eng.user_data = &app
+	append(&eng.passes, opaque_pass)
+
+	frame_data: levi.Frame_Data
 
 	for {
 		if !poll_window_events(window) do break
 
-		handle_window_resize(
-			window,
-			&win_s[0],
-			&win_s[1],
-			state.next_frame % levi.FLIGHT,
-			state.frame_sem,
-		)
-
-		if .MINIMIZED in sdl.GetWindowFlags(window) || win_s[0] <= 0 || win_s[1] <= 0 {
-			sdl.Delay(16)
-			continue
+		for &inst in app.instances {
+			inst.pos[1] += 0.001
+			if inst.pos[1] > 1 do inst.pos[1] = -1
 		}
 
-		draw(&state, meshes[:], draws[:], shaders, get_view_proj(cam, cam_pos, cam_rot), win_s)
-		state.next_frame += 1
+		aspect := f32(eng.win_s[0]) / f32(eng.win_s[1])
+		view := linalg.matrix4_look_at_f32({0, 0, -3}, {0, 0, 0}, {0, 1, 0})
+		proj := linalg.matrix4_perspective_f32(linalg.to_radians(f32(45.0)), aspect, 0.1, 100.0)
+		frame_data.view_proj = proj * view
+
+		levi.draw(eng, &frame_data)
 	}
-
-	gpu.wait_idle()
-}
-
-draw :: proc(
-	state: ^levi.Render_State,
-	meshes: []levi.Mesh,
-	draws: []levi.Draw,
-	pair: levi.Shader_Pair,
-	view_proj: matrix[4, 4]f32,
-	win_size: [2]i32,
-) {
-	if state.next_frame > levi.FLIGHT do gpu.semaphore_wait(state.frame_sem, state.next_frame - levi.FLIGHT)
-
-	swapchain := gpu.swapchain_acquire_next()
-	arena := levi.acquire_frame_arena(state, int(state.next_frame % levi.FLIGHT))
-	cmd := gpu.commands_begin(.Main)
-
-	frame := gpu.arena_alloc(arena, levi.Frame_Data)
-	frame.cpu^ = levi.Frame_Data {
-		view_proj = view_proj,
-	}
-
-
-	inst := gpu.arena_alloc(arena, levi.Instance_Data, len(draws))
-	insts := inst.cpu[:len(draws)]
-	for d, i in draws {
-		insts[i] = levi.Instance_Data {
-			model = d.model,
-		}
-	}
-
-	gpu.cmd_begin_render_pass(
-		cmd,
-		{color_attachments = {{texture = swapchain, clear_color = {.1, .1, .1, 1}}}},
-	)
-	gpu.cmd_set_viewport(cmd, {size = {f32(win_size[0]), f32(win_size[1])}, depth_max = 1})
-	gpu.cmd_set_scissor(cmd, {size = {u32(win_size[0]), u32(win_size[1])}})
-	gpu.cmd_set_shaders(cmd, pair[.Vertex], pair[.Fragment])
-	gpu.cmd_set_raster_state(cmd, {topology = .Triangle_List, cull_mode = .None})
-
-	i := 0
-	for i < len(draws) {
-		mesh_id := draws[i].mesh
-		j := i + 1
-		for j < len(draws) && draws[j].mesh == mesh_id do j += 1
-
-		mesh := &meshes[mesh_id]
-		root_alloc := gpu.arena_alloc(arena, levi.Unlit_Vertex_Root)
-		root_alloc.cpu.streams[.Position] = mesh.streams[.Position].ptr
-		root_alloc.cpu.streams[.Color] = mesh.streams[.Color].ptr
-		root_alloc.cpu.instances = rawptr(
-			uintptr(inst.gpu.ptr) + uintptr(i * size_of(levi.Instance_Data)),
-		)
-		root_alloc.cpu.frame = frame.gpu.ptr
-
-		gpu.cmd_draw(cmd, root_alloc.gpu, gpu.null, mesh.vertex_count, u32(j - i))
-		i = j
-	}
-
-	gpu.cmd_end_render_pass(cmd)
-	gpu.cmd_add_signal_semaphore(cmd, state.frame_sem, state.next_frame)
-	gpu.queue_submit(.Main, {cmd})
-	gpu.swapchain_present(.Main, state.frame_sem, state.next_frame)
 }
 
 poll_window_events :: proc(window: ^sdl.Window) -> (proceed: bool) {
 	evt: sdl.Event
-
 	proceed = true
-
 	for sdl.PollEvent(&evt) {
 		#partial switch evt.type {
 		case .QUIT:
@@ -197,70 +149,5 @@ poll_window_events :: proc(window: ^sdl.Window) -> (proceed: bool) {
 			if evt.window.windowID == sdl.GetWindowID(window) do proceed = false
 		}
 	}
-
 	return
-}
-
-handle_window_resize :: proc(
-	window: ^sdl.Window,
-	width, height: ^i32,
-	frame_idx: u64,
-	frame_sem: gpu.Semaphore,
-) {
-	old_ws := [2]i32{width^, height^}
-
-	sdl.GetWindowSizeInPixels(window, width, height)
-
-	if frame_idx > levi.FLIGHT do gpu.semaphore_wait(frame_sem, frame_idx - levi.FLIGHT)
-	if old_ws != {width^, height^} do gpu.swapchain_resize({u32(width^), u32(height^)})
-}
-
-create_triangle_1 :: proc(staging: ^levi.Geometry_Staging) -> levi.Mesh {
-	triangle_pos := [][4]f32{{-1, -1, 0, 1}, {0, 1, 0, 1}, {1, -1, 0, 1}}
-	triangle_colors := [][4]f32{{1, 0, 0, 1}, {0, 1, 0, 1}, {0, 0, 1, 1}}
-
-	ptrs := levi.geometry_append(
-		staging,
-		{
-			.Position = levi.Geometry_Stream {
-				data = raw_data(triangle_pos[:]),
-				count = i64(len(triangle_pos)),
-			},
-			.Color = levi.Geometry_Stream {
-				data = raw_data(triangle_colors[:]),
-				count = i64(len(triangle_colors)),
-			},
-		},
-	)
-
-	return levi.Mesh{streams = ptrs, vertex_count = u32(len(triangle_pos))}
-}
-
-create_triangle_2 :: proc(staging: ^levi.Geometry_Staging) -> levi.Mesh {
-	triangle_pos := [][4]f32{{-1, -1, 0, 1}, {-1, 1, 0, 1}, {1, -1, 0, 1}}
-	triangle_colors := [][4]f32{{0, 1, 0, 1}, {0, 1, 0, 1}, {0, 0, 1, 1}}
-
-	ptrs := levi.geometry_append(
-		staging,
-		{
-			.Position = levi.Geometry_Stream {
-				data = raw_data(triangle_pos[:]),
-				count = i64(len(triangle_pos)),
-			},
-			.Color = levi.Geometry_Stream {
-				data = raw_data(triangle_colors[:]),
-				count = i64(len(triangle_colors)),
-			},
-		},
-	)
-
-	return levi.Mesh{streams = ptrs, vertex_count = u32(len(triangle_pos))}
-}
-
-calculate_model :: #force_inline proc "contextless" (
-	pos: [3]f32,
-	rot: quaternion128,
-	scale: [3]f32,
-) -> matrix[4, 4]f32 {
-	return linalg.matrix4_from_trs_f32(pos, rot, scale)
 }

@@ -1,8 +1,11 @@
 import "../shaders/shared/shared.slang";
 
 enum VertexAttribute {
-  COLOR = 0,
-  COUNT = 1,
+  POSITION = 0,
+  COLOR = 1,
+  NORMAL = 2,
+  UV0 = 3,
+  COUNT = 4,
 };
 
 struct FrameData {
@@ -10,14 +13,23 @@ struct FrameData {
 };
 
 struct InstanceData {
+  uint mesh_id;
+  uint material_instance;
+  uint _pad0;
+  uint _pad1;
   float4x4 transform;
 };
 
+struct MaterialParams {
+  float4 base_color;
+  float4 emissive;
+};
+
 struct DrawData {
-  uint64_t frame_data;
-  uint64_t instance_data;
-  uint64_t position;
   uint64_t attributes[(int)VertexAttribute.COUNT];
+  uint64_t instances;
+  uint64_t material_params;
+  uint64_t frame_data;
 };
 
 struct VertexOutput {
@@ -31,20 +43,23 @@ VertexOutput vertMain(uint vertex_id: SV_VertexID,
                       GraphicsPipelineData<DrawData> data) {
   VertexOutput output;
 
-  float4 *positions = (float4 *)data.vert.position;
+  float3 *positions =
+      (float3 *)data.vert.attributes[(int)VertexAttribute.POSITION];
   float4 *colors = (float4 *)data.vert.attributes[(int)VertexAttribute.COLOR];
 
-  InstanceData *instances = (InstanceData *)data.vert.instance_data;
+  InstanceData *instances = (InstanceData *)data.vert.instances;
+  MaterialParams *mat_params = (MaterialParams *)data.vert.material_params;
   FrameData *frame = (FrameData *)data.vert.frame_data;
 
-  float4 local_position = positions[vertex_id];
-  float4 world_position = mul(instances[instance_id].transform, local_position);
+  float3 local_pos = positions[vertex_id];
+  float4 world_pos =
+      mul(instances[instance_id].transform, float4(local_pos, 1.0));
 
-  output.pos = mul(frame.view_proj, world_position);
-  output.color = colors[vertex_id];
+  output.pos = mul(frame.view_proj, world_pos);
+  output.color = colors[vertex_id] * mat_params[instance_id].base_color;
 
   return output;
 }
 
 [shader("fragment")]
-float4 fragMain(float4 color: TEXCOORD0) : SV_Target { return color; }
+float4 fragMain(VertexOutput input) : SV_Target { return input.color; }
