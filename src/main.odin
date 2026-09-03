@@ -6,8 +6,10 @@ import intr "base:intrinsics"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
+import "core:mem"
 import sdl "vendor:sdl3"
 
+// USER: Define your own application data structures
 My_Instance :: struct {
 	pos:   [3]f32,
 	color: [4]f32,
@@ -15,23 +17,24 @@ My_Instance :: struct {
 
 App_State :: struct {
 	instances: [dynamic]My_Instance,
-	vert:      levi.Shader_ID,
-	frag:      levi.Shader_ID,
-	mat:       levi.Material_ID,
 }
 
+// USER: Implement extraction - you handle the math
 extract :: proc(id: levi.Instance_ID, user_data: rawptr) -> levi.Extract_Result {
 	state := cast(^App_State)user_data
 	inst := state.instances[id]
+
+	// USER: Calculate your own transform matrix
 	mat4 := linalg.matrix4_from_trs_f32(inst.pos, linalg.QUATERNIONF32_IDENTITY, {1, 1, 1})
+
 	return levi.Extract_Result {
-		// NO transpose - Odin is already column-major
 		transform = intr.matrix_flatten(mat4),
 		params = levi.Material_Params{base_color = inst.color, emissive = {0, 0, 0, 0}},
 	}
 }
 
-opaque_pass :: proc(ctx: ^levi.Render_Context) {
+// USER: Define your own render pass
+my_opaque_pass :: proc(ctx: ^levi.Render_Context) {
 	r := ctx.renderer
 	if len(r.instances) == 0 do return
 
@@ -70,13 +73,53 @@ opaque_pass :: proc(ctx: ^levi.Render_Context) {
 	gpu.cmd_end_render_pass(ctx.cmd_buf)
 }
 
+// USER: Create your own mesh content
+create_quad :: proc(eng: ^levi.Engine) -> levi.Mesh_ID {
+	pos := make([][4]f32, 4)
+	pos[0] = {-0.5, -0.5, 0, 1}; pos[1] = {0.5, -0.5, 0, 1}
+	pos[2] = {0.5, 0.5, 0, 1}; pos[3] = {-0.5, 0.5, 0, 1}
+
+	col := make([][4]f32, 4)
+	for i in 0 ..< 4 do col[i] = {1, 1, 1, 1}
+
+	idx := make([]u32, 6)
+	idx[0] = 0; idx[1] = 1; idx[2] = 2
+	idx[3] = 0; idx[4] = 2; idx[5] = 3
+
+	return levi.create_mesh(
+		eng,
+		levi.Mesh_Desc {
+			attributes = #partial{
+				.Position = mem.slice_to_bytes(pos[:]),
+				.Color = mem.slice_to_bytes(col[:]),
+			},
+			indices = idx,
+		},
+	)
+}
+
+// USER: Calculate your own view-projection matrix
+calculate_view_proj :: proc(eye, target, up: [3]f32, fov, aspect, near, far: f32) -> [16]f32 {
+	view := linalg.matrix4_look_at_f32(eye, target, up, false)
+	proj := linalg.matrix4_perspective_f32(math.RAD_PER_DEG * fov, aspect, near, far, false)
+
+	// Apply Vulkan depth bias [0, 1]
+	bias: matrix[4, 4]f32 = linalg.MATRIX4F32_IDENTITY
+	bias[2][2] = 0.5
+	bias[2][3] = 0.5
+	proj = proj * bias
+
+	vp := proj * view
+	return intr.matrix_flatten(vp)
+}
+
 main :: proc() {
 	logger := log.create_console_logger(.Info)
 	context.logger = logger
 	defer log.destroy_console_logger(logger)
 
 	ok := sdl.Init({.VIDEO})
-	ensure(ok, "sdl is not initialized"); log.info("sdl initialized")
+	ensure(ok, "sdl is not initialized")
 	defer sdl.Quit()
 
 	window := sdl.CreateWindow(
@@ -85,38 +128,28 @@ main :: proc() {
 		720,
 		{.VULKAN, .RESIZABLE, .HIGH_PIXEL_DENSITY},
 	)
-	ensure(window != nil, "Window creation failed"); log.info("sdl window initialized")
+	ensure(window != nil)
 	defer sdl.DestroyWindow(window)
 
 	eng := levi.engine_init(window, 1280, 720)
 	defer levi.engine_destroy(eng)
 
 	app: App_State
-	app.vert = levi.create_shader(eng, #load("../samples/triangle/unlit.vert.spv", []u32), .Vertex)
-	app.frag = levi.create_shader(
-		eng,
-		#load("../samples/triangle/unlit.frag.spv", []u32),
-		.Fragment,
-	)
-	app.mat = levi.create_material(
-		eng,
-		app.vert,
-		app.frag,
-		params_size = size_of(levi.Material_Params),
-	)
-	mesh := levi.create_mesh(eng, levi.generate_quad_mesh())
 
-	{
-		levi.spawn_instance(eng, mesh, app.mat)
-		append(&app.instances, My_Instance{pos = {0, 0, 0}, color = {1, 0, 0, 1}})
+	vert := levi.create_shader(eng, #load("../samples/triangle/unlit.vert.spv", []u32), .Vertex)
+	frag := levi.create_shader(eng, #load("../samples/triangle/unlit.frag.spv", []u32), .Fragment)
+	mat := levi.create_material(eng, vert, frag, params_size = size_of(levi.Material_Params))
+	mesh := create_quad(eng)
 
-		levi.spawn_instance(eng, mesh, app.mat)
-		append(&app.instances, My_Instance{pos = {0.5, 0, 0}, color = {0, 1, 0, 1}})
-	}
+	levi.spawn_instance(eng, mesh, mat)
+	append(&app.instances, My_Instance{pos = {0, 0, 0}, color = {1, 0, 0, 1}})
+
+	levi.spawn_instance(eng, mesh, mat)
+	append(&app.instances, My_Instance{pos = {0.5, 0, 0}, color = {0, 1, 0, 1}})
 
 	eng.extract = extract
 	eng.user_data = &app
-	append(&eng.passes, opaque_pass)
+	append(&eng.passes, my_opaque_pass)
 
 	frame_data: levi.Frame_Data
 
@@ -130,19 +163,15 @@ main :: proc() {
 		if eng.win_s[0] == 0 || eng.win_s[1] == 0 do continue
 
 		aspect := f32(eng.win_s[0]) / f32(eng.win_s[1])
-
-		view := linalg.matrix4_look_at_f32({0, 0, 3}, {0, 0, 0}, {0, 1, 0}, false)
-		proj := linalg.matrix4_perspective_f32(math.RAD_PER_DEG * 45.0, aspect, 0.1, 100.0, false)
-
-		// Convert OpenGL [-1, 1] depth to Vulkan [0, 1] depth
-		bias: matrix[4, 4]f32 = linalg.MATRIX4F32_IDENTITY
-		bias[2][2] = 0.5
-		bias[2][3] = 0.5
-		proj = proj * bias
-
-		vp := proj * view
-		// NO transpose - Odin is already column-major
-		frame_data.view_proj = intr.matrix_flatten(vp)
+		frame_data.view_proj = calculate_view_proj(
+			{0, 0, -3},
+			{0, 0, 0},
+			{0, 1, 0},
+			45.0,
+			aspect,
+			0.1,
+			100.0,
+		)
 
 		levi.draw(eng, &frame_data)
 	}

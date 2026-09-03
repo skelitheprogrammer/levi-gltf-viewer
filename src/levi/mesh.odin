@@ -53,25 +53,3 @@ create_mesh :: proc(eng: ^Engine, desc: Mesh_Desc) -> Mesh_ID {
 	append(&eng.renderer.meshes, info)
 	return Mesh_ID(u32(len(eng.renderer.meshes) - 1))
 }
-
-generate_quad_mesh :: proc() -> Mesh_Desc {
-	pos := make([][4]f32, 4)
-	pos[0] = {-0.5, -0.5, 0, 1}; pos[1] = {0.5, -0.5, 0, 1}
-	pos[2] = {0.5, 0.5, 0, 1}; pos[3] = {-0.5, 0.5, 0, 1}
-
-	col := make([][4]f32, 4)
-	for i in 0 ..< 4 do col[i] = {1, 1, 1, 1}
-
-	idx := make([]u32, 6)
-	// FIX: Reversed winding (CW in clip space → CCW in framebuffer space)
-	idx[0] = 0; idx[1] = 2; idx[2] = 1
-	idx[3] = 0; idx[4] = 3; idx[5] = 2
-
-	return Mesh_Desc {
-		attributes = #partial{
-			.Position = mem.slice_to_bytes(pos[:]),
-			.Color = mem.slice_to_bytes(col[:]),
-		},
-		indices = idx,
-	}
-}
