@@ -14,24 +14,23 @@ struct VertexData {
   uint64_t frame_data;
 };
 
+// Matches Odin's Instance_Data with #align(16) on transform
 struct InstanceData {
   uint mesh_id;
   uint material_instance;
-  uint _pad0, _pad1;
   float4x4 transform;
 };
 
-struct MaterialParams {
-  float4 base_color;
-  float4 emissive;
+// Matches Odin's Custom_Material
+struct CustomMaterial {
+  float4 color;
+  float time;
 };
 
 struct FrameData {
   float4x4 view_proj;
 };
 
-// Per-draw user data. Matches Odin's Per_Draw_Data.
-// Accessed via data.drawData in the shader.
 struct PerDrawData {
   uint instance_index;
 };
@@ -56,19 +55,19 @@ vertMain(VSInput input,
   float4 *colors =
       (float4 *)pipeline.vert.attributes[(int)VertexAttribute.COLOR];
   InstanceData *instances = (InstanceData *)pipeline.vert.instances;
-  MaterialParams *mat_params = (MaterialParams *)pipeline.vert.material_params;
+  CustomMaterial *mat_params = (CustomMaterial *)pipeline.vert.material_params;
   FrameData *frame = (FrameData *)pipeline.vert.frame_data;
 
   float4 local_pos = positions[input.vertexID];
 
-  // Per-draw instance index from the indirect buffer's user data
+  // Per-draw instance index from the compacted staging buffer
   uint idx = pipeline.drawData.instance_index;
 
   float4 world_pos = mul(instances[idx].transform, local_pos);
   float4 clip_pos = mul(frame.view_proj, world_pos);
 
   output.pos = clip_pos;
-  output.color = colors[input.vertexID] * mat_params[idx].base_color;
+  output.color = colors[input.vertexID] * mat_params[idx].color;
 
   return output;
 }

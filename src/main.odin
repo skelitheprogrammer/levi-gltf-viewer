@@ -34,7 +34,7 @@ main :: proc() {
 	defer levi.engine_destroy(eng)
 
 	app: App_State
-	app.cam_state.pos = {0, 2, 5}
+	app.cam_state.pos = {0, 0, -3} // Left-handed: camera at -Z looking at +Z (origin)
 	app.cam = Camera {
 		mode   = Perspective{linalg.to_radians(f32(60))},
 		near   = 0.1,
@@ -64,29 +64,21 @@ main :: proc() {
 		Custom_Material{color = {0, 1, 0, 1}, time = 0.0},
 	)
 
-	levi.spawn_instance(
-		eng,
-		mesh,
-		app.red_mat,
-		transmute([16]f32)linalg.matrix4_from_trs_f32(
-			{1, 0, 0},
-			linalg.QUATERNIONF32_IDENTITY,
-			{1, 1, 1},
-		),
+	id1, _ := levi.spawn_instance(eng, mesh, app.red_mat)
+	append(
+		&app.instances,
+		My_Instance{pos = {1, 0, 0}, rot = linalg.QUATERNIONF32_IDENTITY, scale = {1, 1, 1}},
 	)
-	levi.spawn_instance(
-		eng,
-		mesh,
-		green_mat,
-		transmute([16]f32)linalg.matrix4_from_trs_f32(
-			{-1, 0, -1},
-			linalg.QUATERNIONF32_IDENTITY,
-			{1, 1, 1},
-		),
+
+	id2, _ := levi.spawn_instance(eng, mesh, green_mat)
+	append(
+		&app.instances,
+		My_Instance{pos = {-1, 0, 0}, rot = linalg.QUATERNIONF32_IDENTITY, scale = {1, 1, 1}},
 	)
 	log.info("Assets loaded.")
 
 	eng.user_data = &app
+	eng.extract = extract_instance
 	eng.view_extract = extract_view
 	append(&eng.passes, my_opaque_pass)
 
@@ -108,7 +100,10 @@ main :: proc() {
 		app.cam.aspect = f32(eng.win_s[0]) / f32(eng.win_s[1])
 
 		update_camera(&app.cam_state, &input, delta_time)
+
+		app.instances[0].pos.y = math.sin(app.time) * 0.5
 		app.time += delta_time
+
 		levi.update_material_asset(
 			eng,
 			app.red_mat,

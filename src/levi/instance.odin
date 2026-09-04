@@ -1,6 +1,7 @@
 package levi
 
 import "core:fmt"
+import "core:math/linalg"
 
 Instance_Data :: struct #align (16) {
 	mesh_id:    Mesh_ID,
@@ -12,7 +13,6 @@ spawn_instance :: #force_inline proc(
 	eng: ^Engine,
 	mesh: Mesh_ID,
 	mat: Material_Handle,
-	transform: [16]f32,
 	loc := #caller_location,
 ) -> (
 	Instance_ID,
@@ -26,7 +26,11 @@ spawn_instance :: #force_inline proc(
 	id := Instance_ID(u32(len(eng.renderer.instances)))
 	append(
 		&eng.renderer.instances,
-		Instance_Data{mesh_id = mesh, mat_handle = mat, transform = transform},
+		Instance_Data {
+			mesh_id = mesh,
+			mat_handle = mat,
+			transform = transmute([16]f32)linalg.MATRIX4F32_IDENTITY,
+		},
 	)
 
 	log_levi(fmt.tprintf("Instance %v spawned.", id), loc)

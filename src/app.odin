@@ -11,7 +11,14 @@ Custom_Material :: struct {
 	time:  f32,
 }
 
+My_Instance :: struct {
+	pos:   [3]f32,
+	rot:   linalg.Quaternionf32,
+	scale: [3]f32,
+}
+
 App_State :: struct {
+	instances: [dynamic]My_Instance,
 	mat_type:  levi.Material_Type_ID,
 	red_mat:   levi.Material_Handle,
 	time:      f32,
@@ -19,10 +26,20 @@ App_State :: struct {
 	cam_state: Camera_State,
 }
 
+// FIX: Exact math from draw_test that is guaranteed to render
 extract_view :: proc(user_data: rawptr) -> levi.Frame_Data {
 	app := cast(^App_State)(user_data)
-	view_proj := get_view_proj(app.cam, app.cam_state.pos, app.cam_state.rot)
-	return levi.Frame_Data{view_proj = intrinsics.matrix_flatten(view_proj)}
+	aspect := f32(app.cam.aspect)
+	view := linalg.matrix4_look_at_f32({0, 0, -3}, {0, 0, 0}, {0, 1, 0})
+	proj := linalg.matrix4_perspective_f32(linalg.to_radians(f32(60.0)), aspect, 0.1, 100.0)
+	return levi.Frame_Data{view_proj = intrinsics.matrix_flatten(proj * view)}
+}
+
+extract_instance :: proc(id: levi.Instance_ID, user_data: rawptr) -> [16]f32 {
+	app := cast(^App_State)(user_data)
+	inst := app.instances[id]
+	mat := linalg.matrix4_from_trs_f32(inst.pos, inst.rot, inst.scale)
+	return transmute([16]f32)mat
 }
 
 create_quad :: proc(eng: ^levi.Engine) -> levi.Mesh_ID {
@@ -34,6 +51,7 @@ create_quad :: proc(eng: ^levi.Engine) -> levi.Mesh_ID {
 	for i in 0 ..< 4 do col_arr[i] = {1, 1, 1, 1}
 
 	idx := make([]u32, 6)
+	// FIX: Standard Counter-Clockwise (CCW) winding order
 	idx[0] = 0; idx[1] = 1; idx[2] = 2
 	idx[3] = 0; idx[4] = 2; idx[5] = 3
 
@@ -62,31 +80,27 @@ create_quad :: proc(eng: ^levi.Engine) -> levi.Mesh_ID {
 	return mesh_id
 }
 
+
 my_opaque_pass :: proc(ctx: ^levi.Render_Context) {
 	app := cast(^App_State)(ctx.user_data)
 	if app == nil do return
 
-	// 1. Begin Render Pass (Automatically sets Viewport, Scissor, and all required dynamic states!)
 	gpu.cmd_begin_render_pass(
 		ctx.cmd_buf,
 		{color_attachments = {{texture = ctx.target, clear_color = {0.15, 0.15, 0.15, 1.0}}}},
 	)
 
-	// 2. Set Depth State (No depth buffer attached, so disable depth testing)
 	gpu.cmd_set_depth_state(ctx.cmd_buf, gpu.Depth_State{mode = {}, compare = .Always})
-
-	// 3. Set Blend State
 	gpu.cmd_set_blend_state(ctx.cmd_buf, gpu.Blend_State{})
 
-	// 4. Set Raster State (Overrides defaults set by begin_render_pass)
+	// IMPORTANT: cull_mode = .None is used because the Vulkan Y-flip in the projection
+	// matrix reverses the screen-space winding order of the triangles.
 	gpu.cmd_set_raster_state(
 		ctx.cmd_buf,
-		gpu.Raster_State{topology = .Triangle_List, cull_mode = .Cull_CW},
+		gpu.Raster_State{topology = .Triangle_List, cull_mode = .None},
 	)
 
-	// 5. Draw
 	levi.draw_material_type(ctx, app.mat_type)
 
-	// 6. End Render Pass
 	gpu.cmd_end_render_pass(ctx.cmd_buf)
 }

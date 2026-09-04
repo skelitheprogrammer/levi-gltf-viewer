@@ -34,9 +34,6 @@ Vertex_Format_Sizes: [Vertex_Format]int = {
 	.Int8    = 1,
 }
 
-vertex_format_size :: #force_inline proc(format: Vertex_Format) -> int {
-	return Vertex_Format_Sizes[format]
-}
 
 Vertex_Attribute_Desc :: struct {
 	format:          Vertex_Format,
@@ -47,7 +44,7 @@ Vertex_Attribute_Desc :: struct {
 }
 
 vertex_attribute_byte_size :: #force_inline proc(desc: Vertex_Attribute_Desc) -> int {
-	return int(desc.component_count) * vertex_format_size(desc.format)
+	return int(desc.component_count) * Vertex_Format_Sizes[desc.format]
 }
 
 Mesh_Desc :: struct {
@@ -123,7 +120,7 @@ create_mesh :: proc(
 			mem.copy(staging.cpu, raw_data(data), len(data))
 			gpu.cmd_mem_copy_raw(cmd, eng.renderer.streams[stream_attr], staging.gpu, len(data))
 			eng.renderer.heads[stream_attr] += u32(
-				len(data) / vertex_format_size(attr_desc.format),
+				len(data) / Vertex_Format_Sizes[attr_desc.format],
 			)
 		}
 	}

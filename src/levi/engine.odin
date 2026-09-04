@@ -36,6 +36,7 @@ Render_Context :: struct {
 
 Render_Pass :: proc(ctx: ^Render_Context)
 View_Extract_Fn :: proc(user_data: rawptr) -> Frame_Data
+Extract_Fn :: proc(id: Instance_ID, user_data: rawptr) -> [16]f32
 
 Render_State :: struct {
 	frame_semaphore: gpu.Semaphore,
@@ -59,6 +60,7 @@ Engine :: struct {
 	window:       ^sdl3.Window,
 	win_s:        [2]i32,
 	user_data:    rawptr,
+	extract:      Extract_Fn,
 	view_extract: View_Extract_Fn,
 	passes:       [dynamic]Render_Pass,
 }
@@ -175,6 +177,12 @@ draw :: proc(eng: ^Engine, loc := #caller_location) -> Error {
 		size_of(Frame_Data),
 	)
 
+	if eng.extract != nil {
+		for i in 0 ..< len(eng.renderer.instances) {
+			eng.renderer.instances[i].transform = eng.extract(Instance_ID(i), eng.user_data)
+		}
+	}
+
 	gpu.cmd_barrier(cmd_buf, .Transfer, .All, {})
 
 	ctx := Render_Context {
@@ -202,6 +210,8 @@ draw_material_type :: #force_inline proc(ctx: ^Render_Context, mat_type: Materia
 	draw_material_type_internal(ctx, mat_type)
 }
 
+// ... (Keep everything above draw_material_type_internal exactly the same) ...
+
 @(private)
 draw_material_type_internal :: proc(ctx: ^Render_Context, mat_type: Material_Type_ID) {
 	r := ctx.renderer
@@ -217,21 +227,10 @@ draw_material_type_internal :: proc(ctx: ^Render_Context, mat_type: Material_Typ
 	}
 	if count == 0 do return
 
-	mat_data_size := len(r.material_assets) * MAX_MATERIAL_SIZE
-	mat_staging := gpu.arena_alloc_raw(ctx.frame_arena, mat_data_size, 16)
-
-	for i in 0 ..< len(r.material_assets) {
-		if r.material_assets[i].type_id == mat_type {
-			mem.copy(
-				rawptr(uintptr(mat_staging.cpu) + uintptr(i * MAX_MATERIAL_SIZE)),
-				raw_data(r.material_assets[i].data[:]),
-				int(type_info.size),
-			)
-		}
-	}
-
 	staging_inst := gpu.arena_alloc(ctx.frame_arena, Instance_Data, count)
 	staging_cmds := gpu.arena_alloc(ctx.frame_arena, Indirect_Draw, count)
+
+	staging_mats := gpu.arena_alloc_raw(ctx.frame_arena, count * int(type_info.size), 16)
 
 	cmd_idx := 0
 	for i in 0 ..< len(r.instances) {
@@ -240,6 +239,12 @@ draw_material_type_internal :: proc(ctx: ^Render_Context, mat_type: Material_Typ
 			mesh := r.meshes[inst.mesh_id]
 
 			staging_inst.cpu[cmd_idx] = inst
+
+			mem.copy(
+				rawptr(uintptr(staging_mats.cpu) + uintptr(cmd_idx * int(type_info.size))),
+				raw_data(r.material_assets[inst.mat_handle].data[:]),
+				int(type_info.size),
+			)
 
 			staging_cmds.cpu[cmd_idx] = Indirect_Draw {
 				cmd = gpu.Draw_Indexed_Indirect_Command {
@@ -262,7 +267,7 @@ draw_material_type_internal :: proc(ctx: ^Render_Context, mat_type: Material_Typ
 		root.cpu.attributes[attr] = r.streams[Stream_Attribute(attr)].ptr
 	}
 	root.cpu.instances = staging_inst.gpu.ptr
-	root.cpu.material_params = mat_staging.gpu.ptr
+	root.cpu.material_params = staging_mats.gpu.ptr
 	root.cpu.frame_data = r.streams[.Frame_Data_Stream].ptr
 
 	count_buf := gpu.arena_alloc(ctx.frame_arena, u32, 1)
@@ -270,7 +275,7 @@ draw_material_type_internal :: proc(ctx: ^Render_Context, mat_type: Material_Typ
 
 	gpu.cmd_draw_indexed_indirect_multi_raw(
 		ctx.cmd_buf,
-		root,
+		root.gpu, // <--- FIX: Pass the actual gpuptr, not the Arena_Alloc struct
 		{},
 		r.streams[.Indices],
 		.U32,
