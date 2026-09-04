@@ -26,12 +26,16 @@ App_State :: struct {
 	cam_state: Camera_State,
 }
 
-// FIX: Exact math from draw_test that is guaranteed to render
 extract_view :: proc(user_data: rawptr) -> levi.Frame_Data {
 	app := cast(^App_State)(user_data)
 	aspect := f32(app.cam.aspect)
-	view := linalg.matrix4_look_at_f32({0, 0, -3}, {0, 0, 0}, {0, 1, 0})
+
+	forward := linalg.mul(app.cam_state.rot, [3]f32{0, 0, 1})
+	target := app.cam_state.pos + forward
+
+	view := linalg.matrix4_look_at_f32(app.cam_state.pos, target, [3]f32{0, 1, 0})
 	proj := linalg.matrix4_perspective_f32(linalg.to_radians(f32(60.0)), aspect, 0.1, 100.0)
+
 	return levi.Frame_Data{view_proj = intrinsics.matrix_flatten(proj * view)}
 }
 
@@ -39,9 +43,8 @@ extract_instance :: proc(id: levi.Instance_ID, user_data: rawptr) -> [16]f32 {
 	app := cast(^App_State)(user_data)
 	inst := app.instances[id]
 	mat := linalg.matrix4_from_trs_f32(inst.pos, inst.rot, inst.scale)
-	return transmute([16]f32)mat
+	return intrinsics.matrix_flatten(mat)
 }
-
 create_quad :: proc(eng: ^levi.Engine) -> levi.Mesh_ID {
 	pos := make([][4]f32, 4)
 	pos[0] = {-0.5, -0.5, 0, 1}; pos[1] = {0.5, -0.5, 0, 1}
@@ -51,7 +54,6 @@ create_quad :: proc(eng: ^levi.Engine) -> levi.Mesh_ID {
 	for i in 0 ..< 4 do col_arr[i] = {1, 1, 1, 1}
 
 	idx := make([]u32, 6)
-	// FIX: Standard Counter-Clockwise (CCW) winding order
 	idx[0] = 0; idx[1] = 1; idx[2] = 2
 	idx[3] = 0; idx[4] = 2; idx[5] = 3
 
@@ -80,7 +82,6 @@ create_quad :: proc(eng: ^levi.Engine) -> levi.Mesh_ID {
 	return mesh_id
 }
 
-
 my_opaque_pass :: proc(ctx: ^levi.Render_Context) {
 	app := cast(^App_State)(ctx.user_data)
 	if app == nil do return
@@ -90,11 +91,6 @@ my_opaque_pass :: proc(ctx: ^levi.Render_Context) {
 		{color_attachments = {{texture = ctx.target, clear_color = {0.15, 0.15, 0.15, 1.0}}}},
 	)
 
-	gpu.cmd_set_depth_state(ctx.cmd_buf, gpu.Depth_State{mode = {}, compare = .Always})
-	gpu.cmd_set_blend_state(ctx.cmd_buf, gpu.Blend_State{})
-
-	// IMPORTANT: cull_mode = .None is used because the Vulkan Y-flip in the projection
-	// matrix reverses the screen-space winding order of the triangles.
 	gpu.cmd_set_raster_state(
 		ctx.cmd_buf,
 		gpu.Raster_State{topology = .Triangle_List, cull_mode = .None},

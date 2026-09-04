@@ -34,7 +34,7 @@ main :: proc() {
 	defer levi.engine_destroy(eng)
 
 	app: App_State
-	app.cam_state.pos = {0, 0, -3} // Left-handed: camera at -Z looking at +Z (origin)
+	app.cam_state.pos = {0, 0, -3}
 	app.cam = Camera {
 		mode   = Perspective{linalg.to_radians(f32(60))},
 		near   = 0.1,
@@ -100,6 +100,7 @@ main :: proc() {
 		app.cam.aspect = f32(eng.win_s[0]) / f32(eng.win_s[1])
 
 		update_camera(&app.cam_state, &input, delta_time)
+		log.info(app.cam_state)
 
 		app.instances[0].pos.y = math.sin(app.time) * 0.5
 		app.time += delta_time

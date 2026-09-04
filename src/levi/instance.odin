@@ -3,7 +3,7 @@ package levi
 import "core:fmt"
 import "core:math/linalg"
 
-Instance_Data :: struct #align (16) {
+Instance_Data :: struct {
 	mesh_id:    Mesh_ID,
 	mat_handle: Material_Handle,
 	transform:  [16]f32,

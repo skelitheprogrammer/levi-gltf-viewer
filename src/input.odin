@@ -16,6 +16,7 @@ Camera_State :: struct {
 
 update_camera :: proc(cam: ^Camera_State, input: ^Input_State, dt: f32) {
 	mouse_sensitivity: f32 = 0.002
+
 	cam.angle.x -= input.mouse_dx * mouse_sensitivity
 	cam.angle.y -= input.mouse_dy * mouse_sensitivity
 	cam.angle.y = clamp(cam.angle.y, -1.5, 1.5)
@@ -23,17 +24,16 @@ update_camera :: proc(cam: ^Camera_State, input: ^Input_State, dt: f32) {
 	move_speed: f32 = 2.0
 	move_dir: [3]f32
 
-	is_pressed :: #force_inline proc(input: ^Input_State, key: sdl.Scancode) -> bool {
+	is_pressed :: proc(input: ^Input_State, key: sdl.Scancode) -> bool {
 		idx := int(key)
 		if idx >= len(input.keys_pressed) do return false
 		return input.keys_pressed[idx]
 	}
 
-	// Left-Handed: +Z is forward, +X is right
 	if is_pressed(input, .W) do move_dir.z += 1
 	if is_pressed(input, .S) do move_dir.z -= 1
-	if is_pressed(input, .D) do move_dir.x += 1
-	if is_pressed(input, .A) do move_dir.x -= 1
+	if is_pressed(input, .D) do move_dir.x -= 1
+	if is_pressed(input, .A) do move_dir.x += 1
 	if is_pressed(input, .E) do move_dir.y += 1
 	if is_pressed(input, .Q) do move_dir.y -= 1
 

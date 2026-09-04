@@ -1,7 +1,6 @@
 package levi
 
 import "../gpu/gpu"
-import "core:fmt"
 import "core:mem"
 import "vendor:sdl3"
 
@@ -245,7 +244,6 @@ draw_material_type_internal :: proc(ctx: ^Render_Context, mat_type: Material_Typ
 				raw_data(r.material_assets[inst.mat_handle].data[:]),
 				int(type_info.size),
 			)
-
 			staging_cmds.cpu[cmd_idx] = Indirect_Draw {
 				cmd = gpu.Draw_Indexed_Indirect_Command {
 					index_count = mesh.index_count,
@@ -275,7 +273,7 @@ draw_material_type_internal :: proc(ctx: ^Render_Context, mat_type: Material_Typ
 
 	gpu.cmd_draw_indexed_indirect_multi_raw(
 		ctx.cmd_buf,
-		root.gpu, // <--- FIX: Pass the actual gpuptr, not the Arena_Alloc struct
+		root.gpu,
 		{},
 		r.streams[.Indices],
 		.U32,
