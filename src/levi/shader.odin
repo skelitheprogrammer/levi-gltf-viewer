@@ -3,6 +3,10 @@ package levi
 import "../gpu/gpu"
 import "core:fmt"
 
+Shader_ID :: distinct u32
+INVALID_SHADER_ID :: Shader_ID(~u32(0))
+
+
 create_shader :: proc(
 	eng: ^Engine,
 	spirv: []u32,

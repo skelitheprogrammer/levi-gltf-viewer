@@ -3,6 +3,11 @@ package levi
 import "core:fmt"
 import "core:math/linalg"
 
+Instance_ID :: distinct u32
+
+INVALID_INSTANCE_ID :: Instance_ID(~u32(0))
+
+
 Instance_Data :: struct {
 	mesh_id:    Mesh_ID,
 	mat_handle: Material_Handle,

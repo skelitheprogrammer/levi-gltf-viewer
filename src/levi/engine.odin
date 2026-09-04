@@ -4,6 +4,8 @@ import "../gpu/gpu"
 import "core:mem"
 import "vendor:sdl3"
 
+FLIGHT :: 3
+
 Frame_Data :: struct #align (16) {
 	view_proj: [16]f32,
 }
@@ -205,14 +207,7 @@ draw :: proc(eng: ^Engine, loc := #caller_location) -> Error {
 	return .None
 }
 
-draw_material_type :: #force_inline proc(ctx: ^Render_Context, mat_type: Material_Type_ID) {
-	draw_material_type_internal(ctx, mat_type)
-}
-
-// ... (Keep everything above draw_material_type_internal exactly the same) ...
-
-@(private)
-draw_material_type_internal :: proc(ctx: ^Render_Context, mat_type: Material_Type_ID) {
+draw_material_type :: proc(ctx: ^Render_Context, mat_type: Material_Type_ID) {
 	r := ctx.renderer
 	if u32(mat_type) >= u32(len(r.material_types)) do return
 	type_info := r.material_types[mat_type]

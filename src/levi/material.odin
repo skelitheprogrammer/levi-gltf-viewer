@@ -1,8 +1,13 @@
 package levi
 
-import "../gpu/gpu"
 import "core:fmt"
 import "core:mem"
+
+Material_Type_ID :: distinct u32
+Material_Handle :: distinct u32
+
+INVALID_MATERIAL_TYPE :: Material_Type_ID(~u32(0))
+INVALID_MATERIAL_HANDLE :: Material_Handle(~u32(0))
 
 MAX_MATERIAL_SIZE :: 256
 

@@ -4,6 +4,10 @@ import "../gpu/gpu"
 import "core:fmt"
 import "core:mem"
 
+Mesh_ID :: distinct u32
+INVALID_MESH_ID :: Mesh_ID(~u32(0))
+
+
 Vertex_Attribute :: enum {
 	Position,
 	Color,
