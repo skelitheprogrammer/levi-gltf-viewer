@@ -22,37 +22,33 @@ Vertex_Format :: enum {
 	Int8,
 }
 
+@(rodata)
+Vertex_Format_Sizes: [Vertex_Format]int = {
+	.Float32 = 4,
+	.Float16 = 2,
+	.Uint32  = 4,
+	.Uint16  = 2,
+	.Uint8   = 1,
+	.Int32   = 4,
+	.Int16   = 2,
+	.Int8    = 1,
+}
+
 vertex_format_size :: #force_inline proc(format: Vertex_Format) -> int {
-	switch format {
-	case .Float32:
-		return 4
-	case .Float16:
-		return 2
-	case .Uint32, .Int32:
-		return 4
-	case .Uint16, .Int16:
-		return 2
-	case .Uint8, .Int8:
-		return 1
-	}
-	return 0
+	return Vertex_Format_Sizes[format]
 }
 
 Vertex_Attribute_Desc :: struct {
 	format:          Vertex_Format,
-	component_count: u32, // 1-4 components
-	offset:          u32, // Byte offset in vertex
-	stride:          u32, // Byte stride between vertices
-	normalized:      bool, // Normalize integers to [0,1] or [-1,1]
+	component_count: u32,
+	offset:          u32,
+	stride:          u32,
+	normalized:      bool,
 }
 
 vertex_attribute_byte_size :: #force_inline proc(desc: Vertex_Attribute_Desc) -> int {
 	return int(desc.component_count) * vertex_format_size(desc.format)
 }
-
-// ============================================================================
-// Mesh Types
-// ============================================================================
 
 Mesh_Desc :: struct {
 	attributes:      [Vertex_Attribute][]u8,
@@ -70,10 +66,6 @@ Mesh_Info :: struct #align (16) {
 	attribute_descs: [Vertex_Attribute]Vertex_Attribute_Desc,
 }
 
-// ============================================================================
-// Mesh Creation
-// ============================================================================
-
 create_mesh :: proc(
 	eng: ^Engine,
 	desc: ^Mesh_Desc,
@@ -87,7 +79,6 @@ create_mesh :: proc(
 		return INVALID_MESH_ID, .Invalid_Argument
 	}
 
-	// Validate formats
 	for attr in Vertex_Attribute {
 		data := desc.attributes[attr]
 		if len(data) > 0 {

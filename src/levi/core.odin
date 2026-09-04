@@ -5,7 +5,6 @@ import "core:log"
 
 FLIGHT :: 3
 
-
 Mesh_ID :: distinct u32
 Material_Type_ID :: distinct u32
 Material_Handle :: distinct u32
@@ -17,7 +16,6 @@ INVALID_MATERIAL_TYPE :: Material_Type_ID(~u32(0))
 INVALID_MATERIAL_HANDLE :: Material_Handle(~u32(0))
 INVALID_SHADER_ID :: Shader_ID(~u32(0))
 INVALID_INSTANCE_ID :: Instance_ID(~u32(0))
-
 
 Error :: enum {
 	None,

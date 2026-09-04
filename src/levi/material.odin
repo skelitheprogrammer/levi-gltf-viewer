@@ -1,5 +1,6 @@
 package levi
 
+import "../gpu/gpu"
 import "core:fmt"
 import "core:mem"
 
@@ -15,7 +16,6 @@ Material_Asset :: struct {
 	type_id: Material_Type_ID,
 	data:    [MAX_MATERIAL_SIZE]u8,
 }
-
 
 register_material_type :: #force_inline proc(
 	$T: typeid,
@@ -61,7 +61,6 @@ register_material_type_internal :: proc(
 	return id, .None
 }
 
-
 create_material_asset :: #force_inline proc(
 	eng: ^Engine,
 	mat_type: Material_Type_ID,
@@ -75,24 +74,8 @@ create_material_asset :: #force_inline proc(
 		log_error(.Material_Too_Large, loc)
 		return INVALID_MATERIAL_HANDLE, .Material_Too_Large
 	}
-	// Assign to local variable to satisfy Odin's addressability rules
 	data_ptr := data
 	return create_material_asset_internal(eng, mat_type, &data_ptr, size_of(T), loc)
-}
-
-update_material_asset :: #force_inline proc(
-	eng: ^Engine,
-	handle: Material_Handle,
-	data: $T,
-	loc := #caller_location,
-) -> Error {
-	if size_of(T) > MAX_MATERIAL_SIZE {
-		log_error(.Material_Too_Large, loc)
-		return .Material_Too_Large
-	}
-	// Assign to local variable to satisfy Odin's addressability rules
-	data_ptr := data
-	return update_material_asset_internal(eng, handle, &data_ptr, size_of(T), loc)
 }
 
 @(private)
@@ -120,6 +103,20 @@ create_material_asset_internal :: proc(
 	handle := Material_Handle(u32(len(eng.renderer.material_assets) - 1))
 	log_levi(fmt.tprintf("Material asset %v created.", handle), loc)
 	return handle, .None
+}
+
+update_material_asset :: #force_inline proc(
+	eng: ^Engine,
+	handle: Material_Handle,
+	data: $T,
+	loc := #caller_location,
+) -> Error {
+	if size_of(T) > MAX_MATERIAL_SIZE {
+		log_error(.Material_Too_Large, loc)
+		return .Material_Too_Large
+	}
+	data_ptr := data
+	return update_material_asset_internal(eng, handle, &data_ptr, size_of(T), loc)
 }
 
 @(private)

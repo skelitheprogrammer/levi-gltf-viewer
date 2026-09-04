@@ -16,10 +16,8 @@ Camera_State :: struct {
 
 update_camera :: proc(cam: ^Camera_State, input: ^Input_State, dt: f32) {
 	mouse_sensitivity: f32 = 0.002
-
 	cam.angle.x -= input.mouse_dx * mouse_sensitivity
 	cam.angle.y -= input.mouse_dy * mouse_sensitivity
-
 	cam.angle.y = clamp(cam.angle.y, -1.5, 1.5)
 
 	move_speed: f32 = 2.0
@@ -27,9 +25,7 @@ update_camera :: proc(cam: ^Camera_State, input: ^Input_State, dt: f32) {
 
 	is_pressed :: #force_inline proc(input: ^Input_State, key: sdl.Scancode) -> bool {
 		idx := int(key)
-		if idx >= len(input.keys_pressed) {
-			return false
-		}
+		if idx >= len(input.keys_pressed) do return false
 		return input.keys_pressed[idx]
 	}
 
@@ -40,9 +36,7 @@ update_camera :: proc(cam: ^Camera_State, input: ^Input_State, dt: f32) {
 	if is_pressed(input, .E) do move_dir.y += 1
 	if is_pressed(input, .Q) do move_dir.y -= 1
 
-	if linalg.dot(move_dir, move_dir) > 0 {
-		move_dir = linalg.normalize(move_dir)
-	}
+	if linalg.dot(move_dir, move_dir) > 0 do move_dir = linalg.normalize(move_dir)
 
 	pitch_rot := linalg.quaternion_angle_axis(cam.angle.y, [3]f32{1, 0, 0})
 	yaw_rot := linalg.quaternion_angle_axis(cam.angle.x, [3]f32{0, 1, 0})
@@ -62,20 +56,15 @@ poll_window_events :: proc(window: ^sdl.Window, input: ^Input_State) -> (proceed
 		case .QUIT:
 			proceed = false
 		case .KEY_DOWN:
-			if evt.key.scancode == .F12 {
-				proceed = false
-			} else {
+			if evt.key.scancode == .F12 do proceed = false
+			else {
 				idx := int(evt.key.scancode)
-				for len(input.keys_pressed) <= idx {
-					append(&input.keys_pressed, false)
-				}
+				for len(input.keys_pressed) <= idx do append(&input.keys_pressed, false)
 				input.keys_pressed[idx] = true
 			}
 		case .KEY_UP:
 			idx := int(evt.key.scancode)
-			for len(input.keys_pressed) <= idx {
-				append(&input.keys_pressed, false)
-			}
+			for len(input.keys_pressed) <= idx do append(&input.keys_pressed, false)
 			input.keys_pressed[idx] = false
 		case .WINDOW_CLOSE_REQUESTED:
 			if evt.window.windowID == sdl.GetWindowID(window) do proceed = false

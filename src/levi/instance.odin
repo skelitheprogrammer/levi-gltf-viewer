@@ -5,7 +5,6 @@ import "core:fmt"
 Instance_Data :: struct #align (16) {
 	mesh_id:    Mesh_ID,
 	mat_handle: Material_Handle,
-	_pad:       u32,
 	transform:  [16]f32,
 }
 
@@ -59,15 +58,4 @@ destroy_instance :: #force_inline proc(
 
 	log_levi(fmt.tprintf("Instance %v destroyed.", id), loc)
 	return .None
-}
-
-update_instance_transform :: #force_inline proc(
-	eng: ^Engine,
-	id: Instance_ID,
-	transform: [16]f32,
-) {
-	idx := u32(id)
-	if idx < u32(len(eng.renderer.instances)) {
-		eng.renderer.instances[idx].transform = transform
-	}
 }

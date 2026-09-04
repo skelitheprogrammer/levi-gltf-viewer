@@ -1,10 +1,9 @@
 package levi
 
 import "../gpu/gpu"
-import "../levi"
+import "core:fmt"
 import "core:mem"
 import "vendor:sdl3"
-
 
 Frame_Data :: struct #align (16) {
 	view_proj: [16]f32,
@@ -26,7 +25,6 @@ Vertex_Root :: struct {
 	frame_data:      rawptr,
 }
 
-
 Render_Context :: struct {
 	cmd_buf:     gpu.Command_Buffer,
 	target:      gpu.Texture,
@@ -37,7 +35,6 @@ Render_Context :: struct {
 }
 
 Render_Pass :: proc(ctx: ^Render_Context)
-
 View_Extract_Fn :: proc(user_data: rawptr) -> Frame_Data
 
 Render_State :: struct {
@@ -145,7 +142,6 @@ engine_destroy :: proc(eng: ^Engine, loc := #caller_location) {
 	log_levi("Engine destroyed.", loc)
 }
 
-
 draw :: proc(eng: ^Engine, loc := #caller_location) -> Error {
 	if eng == nil do return .Invalid_Argument
 	if eng.view_extract == nil {
@@ -201,7 +197,6 @@ draw :: proc(eng: ^Engine, loc := #caller_location) -> Error {
 
 	return .None
 }
-
 
 draw_material_type :: #force_inline proc(ctx: ^Render_Context, mat_type: Material_Type_ID) {
 	draw_material_type_internal(ctx, mat_type)

@@ -1,8 +1,8 @@
 package main
 
 import levi "../src/levi"
-import "base:intrinsics"
 import "core:log"
+import "core:math"
 import "core:math/linalg"
 import sdl "vendor:sdl3"
 
@@ -24,10 +24,7 @@ main :: proc() {
 	)
 	ensure(window != nil)
 	defer sdl.DestroyWindow(window)
-	ok = sdl.SetWindowRelativeMouseMode(
-		window,
-		true,
-	); ensure(ok, "Could not set mouse relative to window")
+	_ = sdl.SetWindowRelativeMouseMode(window, true)
 
 	eng, err := levi.engine_init(window, 1280, 720)
 	if err != .None {
@@ -37,9 +34,14 @@ main :: proc() {
 	defer levi.engine_destroy(eng)
 
 	app: App_State
+	app.cam_state.pos = {0, 2, 5}
+	app.cam = Camera {
+		mode   = Perspective{linalg.to_radians(f32(60))},
+		near   = 0.1,
+		far    = 100.0,
+		aspect = f32(eng.win_s[0]) / f32(eng.win_s[1]),
+	}
 	input: Input_State
-	cam_state: Camera_State
-	cam_state.pos = {0, 2, 5}
 
 	log.info("Loading assets...")
 	vert, _ := levi.create_shader(eng, #load("../samples/triangle/unlit.vert.spv", []u32), .Vertex)
@@ -48,9 +50,7 @@ main :: proc() {
 		#load("../samples/triangle/unlit.frag.spv", []u32),
 		.Fragment,
 	)
-
 	app.mat_type, _ = levi.register_material_type(Custom_Material, eng, vert, frag)
-
 	mesh := create_quad(eng)
 
 	app.red_mat, _ = levi.create_material_asset(
@@ -64,24 +64,31 @@ main :: proc() {
 		Custom_Material{color = {0, 1, 0, 1}, time = 0.0},
 	)
 
-	mat4_1 := linalg.matrix4_from_trs_f32({1, 0, 0}, linalg.QUATERNIONF32_IDENTITY, {1, 1, 1})
-	levi.spawn_instance(eng, mesh, app.red_mat, transmute([16]f32)mat4_1)
-
-	mat4_2 := linalg.matrix4_from_trs_f32({-1, 0, -1}, linalg.QUATERNIONF32_IDENTITY, {1, 1, 1})
-	levi.spawn_instance(eng, mesh, green_mat, transmute([16]f32)mat4_2)
-
+	levi.spawn_instance(
+		eng,
+		mesh,
+		app.red_mat,
+		transmute([16]f32)linalg.matrix4_from_trs_f32(
+			{1, 0, 0},
+			linalg.QUATERNIONF32_IDENTITY,
+			{1, 1, 1},
+		),
+	)
+	levi.spawn_instance(
+		eng,
+		mesh,
+		green_mat,
+		transmute([16]f32)linalg.matrix4_from_trs_f32(
+			{-1, 0, -1},
+			linalg.QUATERNIONF32_IDENTITY,
+			{1, 1, 1},
+		),
+	)
 	log.info("Assets loaded.")
 
 	eng.user_data = &app
-	eng.view_extract = extract_view // <--- ADD THIS LINE
+	eng.view_extract = extract_view
 	append(&eng.passes, my_opaque_pass)
-	frame_data: levi.Frame_Data
-	cam: Camera = {
-		mode   = Perspective{linalg.to_radians(f32(60))},
-		near   = 0.1,
-		far    = 100.0,
-		aspect = f32(eng.win_s[0]) / f32(eng.win_s[1]),
-	}
 
 	last_time := sdl.GetPerformanceCounter()
 	ts_freq := sdl.GetPerformanceFrequency()
@@ -97,15 +104,10 @@ main :: proc() {
 		w, h: i32
 		sdl.GetWindowSizeInPixels(window, &w, &h)
 		eng.win_s = {w, h}
-
 		if eng.win_s[0] == 0 || eng.win_s[1] == 0 do continue
-		cam.aspect = f32(eng.win_s[0]) / f32(eng.win_s[1])
+		app.cam.aspect = f32(eng.win_s[0]) / f32(eng.win_s[1])
 
-		update_camera(&cam_state, &input, delta_time)
-		frame_data.view_proj = intrinsics.matrix_flatten(
-			get_view_proj(cam, cam_state.pos, cam_state.rot),
-		)
-
+		update_camera(&app.cam_state, &input, delta_time)
 		app.time += delta_time
 		levi.update_material_asset(
 			eng,
@@ -113,9 +115,7 @@ main :: proc() {
 			Custom_Material{color = {1, 0, 0, 1}, time = app.time},
 		)
 
-		if draw_err := levi.draw(eng); draw_err != .None {
-			log.error("Draw failed.", draw_err)
-		}
+		if draw_err := levi.draw(eng); draw_err != .None do log.error("Draw failed.")
 	}
 	log.info("Main loop exited.")
 }

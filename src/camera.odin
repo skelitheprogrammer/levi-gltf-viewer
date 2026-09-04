@@ -15,7 +15,6 @@ Camera :: struct {
 Orthographic :: struct {
 	size: f32,
 }
-
 Perspective :: struct {
 	fov: f32,
 }
@@ -40,12 +39,10 @@ get_view_proj :: proc(cam: Camera, pos: [3]f32, rot: linalg.Quaternionf32) -> ma
 		)
 		proj[1][1] *= -1
 		return bias * proj * view
-
 	case Perspective:
 		proj := linalg.matrix4_perspective(v.fov, cam.aspect, cam.near, cam.far)
 		proj[1][1] *= -1
 		return bias * proj * view
 	}
-
 	return linalg.MATRIX4F32_IDENTITY
 }
