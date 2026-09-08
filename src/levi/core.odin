@@ -26,9 +26,6 @@ Error_Strings: [Error]string = {
 	.Invalid_Argument     = "Invalid argument",
 }
 
-error_string :: #force_inline proc(err: Error) -> string {
-	return Error_Strings[err]
-}
 
 @(private)
 log_levi :: proc(msg: string, loc := #caller_location) {
@@ -37,5 +34,5 @@ log_levi :: proc(msg: string, loc := #caller_location) {
 
 @(private)
 log_error :: proc(err: Error, loc := #caller_location) {
-	log.error(fmt.tprintf("[LEVI ERROR %v:%v] %v", loc.file_path, loc.line, error_string(err)))
+	log.error(fmt.tprintf("[LEVI ERROR %v:%v] %v", loc.file_path, loc.line, Error_Strings[err]))
 }
