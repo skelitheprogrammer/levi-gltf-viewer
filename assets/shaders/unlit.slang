@@ -1,73 +1,53 @@
 import "../shaders/shared/shared.slang";
 
-enum VertexAttribute {
-  POSITION = 0,
-  COLOR = 1,
-  NORMAL = 2,
-  UV0 = 3,
-};
+#define PAGE_SIZE_VERTS 128
+#define PAGE_SIZE_IDX 128
 
-struct VertexData {
-  uint64_t attributes[4];
-  uint64_t instances;
-  uint64_t material_params;
-  uint64_t frame_data;
-};
+public struct VirtualGeometryData {
+  public uint64_t pos_pool;
+  public uint64_t col_pool;
+  public uint64_t idx_pool;
+  public float4x4 view_proj;
+}
 
-// Matches Odin's Instance_Data with #align(16) on transform
-struct InstanceData {
-  uint mesh_id;
-  uint material_instance;
-  float4x4 transform;
-};
-
-// Matches Odin's Custom_Material
-struct CustomMaterial {
-  float4 color;
-  float time;
-};
-
-struct FrameData {
-  float4x4 view_proj;
-};
-
-struct PerDrawData {
-  uint instance_index;
-};
-
-struct VSInput {
-  uint vertexID : SV_VertexID;
-};
+public struct DrawUserData {
+  public uint pos_page;
+  public uint col_page;
+  public uint idx_page;
+}
 
 struct VSOutput {
-  float4 pos : SV_Position;
-  float4 color : TEXCOORD0;
-};
+  float4 position : SV_Position;
+  float4 color : COLOR0;
+}
 
 [shader("vertex")]
-VSOutput
-vertMain(VSInput input,
-         GraphicsPipelineData<VertexData, void, PerDrawData> pipeline) {
+VSOutput vertMain(uint vertex_id: SV_VertexID,
+                 GraphicsPipelineData<VirtualGeometryData, void, DrawUserData>
+                     pipeline_data) {
   VSOutput output;
 
-  float4 *positions =
-      (float4 *)pipeline.vert.attributes[(int)VertexAttribute.POSITION];
-  float4 *colors =
-      (float4 *)pipeline.vert.attributes[(int)VertexAttribute.COLOR];
-  InstanceData *instances = (InstanceData *)pipeline.vert.instances;
-  CustomMaterial *mat_params = (CustomMaterial *)pipeline.vert.material_params;
-  FrameData *frame = (FrameData *)pipeline.vert.frame_data;
+  VirtualGeometryData *root = pipeline_data.vert;
 
-  float4 local_pos = positions[input.vertexID];
+  DrawUserData draw_data = pipeline_data.drawData;
 
-  // Per-draw instance index from the compacted staging buffer
-  uint idx = pipeline.drawData.instance_index;
+  float4 *pos_pool = (float4 *)root->pos_pool;
+  float4 *col_pool = (float4 *)root->col_pool;
+  uint *idx_pool = (uint *)root->idx_pool;
 
-  float4 world_pos = mul(instances[idx].transform, local_pos);
-  float4 clip_pos = mul(frame.view_proj, world_pos);
+  uint local_idx = vertex_id;
 
-  output.pos = clip_pos;
-  output.color = colors[input.vertexID] * mat_params[idx].color;
+  uint base_idx_offset = draw_data.idx_page * PAGE_SIZE_IDX;
+  uint actual_vertex_idx = idx_pool[base_idx_offset + local_idx];
+
+  uint base_vert_offset = draw_data.pos_page * PAGE_SIZE_VERTS;
+  float4 pos = pos_pool[base_vert_offset + actual_vertex_idx];
+
+  uint base_col_offset = draw_data.col_page * PAGE_SIZE_VERTS;
+  float4 col = col_pool[base_col_offset + actual_vertex_idx];
+
+  output.position = mul(root->view_proj, pos);
+  output.color = col;
 
   return output;
 }
