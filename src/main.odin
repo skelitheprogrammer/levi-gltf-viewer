@@ -43,21 +43,20 @@ main :: proc() {
 	context.logger = console_logger
 
 	ensure(sdl.Init({.VIDEO}))
+	defer sdl.Quit()
 	window := init_window()
 	defer sdl.DestroyWindow(window)
-	defer sdl.Quit()
 
 	scale := sdl.GetWindowDisplayScale(window)
-	win_x := i32(f32(Default_Config.w) * scale)
-	win_y := i32(f32(Default_Config.h) * scale)
+	win := [2]i32{i32(f32(Default_Config.w) * scale), i32(f32(Default_Config.h) * scale)}
 
 	ensure(gpu.init())
 	defer gpu.cleanup()
 	gpu.swapchain_create_from_sdl(window, FLIGHT)
 
-	frames: Frame_State
-	frame_init(&frames, {u32(win_x), u32(win_y)})
-	defer frame_destroy(&frames)
+	frames: Renderer
+	renderer_init(&frames, cast([2]u32)(win))
+	defer renderer_destroy(&frames)
 
 	scene: Scene
 	{
@@ -89,19 +88,22 @@ main :: proc() {
 		now_ts := sdl.GetPerformanceCounter()
 		last_ts = now_ts
 
-		cmd, target, arena, ok := frame_begin(&frames, {win_x, win_y})
-		if !ok {
-			sdl.Delay(16)
-			continue
-		}
-
-		opaque_pass(cmd, target, arena, &scene)
-
-		frame_end(&frames, cmd)
+		draw(&frames)
 	}
 
 	gpu.wait_idle()
 }
+
+draw :: proc(frames: ^Renderer, win: [2]i32, scene: ^Scene) {
+	cmd, target, arena, ok := frame_begin(frames, win)
+	if !ok {
+		sdl.Delay(16)
+		return
+	}
+	opaque_pass(cmd, target, arena, scene)
+	frame_end(frames, cmd)
+}
+
 
 handle_window_events :: proc() -> bool {
 	evt: sdl.Event
