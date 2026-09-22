@@ -2,13 +2,15 @@ package main
 
 import "../src/gpu/gpu"
 
+
 opaque_pass :: proc(
 	cmd: gpu.Command_Buffer,
 	target: gpu.Texture,
 	arena: ^gpu.Arena,
-	scene: ^Scene,
+	shaders: Shader_Pair,
 ) {
-	m := &scene.mesh
+
+	gpu.cmd_set_shaders(cmd, shaders[.Vertex], shaders[.Fragment])
 
 	gpu.cmd_begin_render_pass(
 		cmd,
@@ -21,10 +23,6 @@ opaque_pass :: proc(
 	}
 
 	verts := gpu.arena_alloc(arena, Vert_Data)
-	verts.cpu^ = Vert_Data {
-		pos = m[.POS].ptr,
-		col = m[.COL].ptr,
-	}
 
 	gpu.cmd_draw_indexed_raw(cmd, verts, gpu.null, m[.IDX], .U32, scene.index_count)
 	gpu.cmd_end_render_pass(cmd)

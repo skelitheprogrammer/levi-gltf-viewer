@@ -8,30 +8,52 @@ import log "core:log"
 import "core:os"
 import sdl "vendor:sdl3"
 
-
 Config :: struct {
 	name: cstring,
 	w:    c.int,
 	h:    c.int,
 }
 
-Scene :: struct {
-	mesh:        Mesh_GPU,
-	index_count: u32,
-}
-
 Default_Config := Config{"TheGame", 3440, 1440}
 
-init_window :: proc() -> (window: ^sdl.Window) {
-	window = sdl.CreateWindow(
-		Default_Config.name,
-		Default_Config.w,
-		Default_Config.h,
-		{.VULKAN, .HIGH_PIXEL_DENSITY, .FULLSCREEN},
-	)
-	ensure(window != nil)
+Buffer_Type :: enum {
+	POS,
+	COL,
+	IDX,
+}
 
-	return
+@(rodata)
+Buffer_Sizes := [Buffer_Type]i64 {
+	.POS = size_of([4]f32),
+	.COL = size_of([4]f32),
+	.IDX = size_of(u32),
+}
+
+@(rodata)
+Buffer_Aligns := [Buffer_Type]i64 {
+	.POS = align_of([4]f32),
+	.COL = align_of([4]f32),
+	.IDX = align_of(u32),
+}
+
+@(rodata)
+Buffer_Memory := [Buffer_Type]gpu.Memory {
+	.POS = .GPU,
+	.COL = .GPU,
+	.IDX = .GPU,
+}
+
+buffer_desc :: proc(type: Buffer_Type) -> Buffer_Desc {
+	return {size = Buffer_Sizes[type], align = Buffer_Aligns[type], type = Buffer_Memory[type]}
+}
+
+buffer_descs :: proc(allocator := context.allocator) -> []Buffer_Desc {
+	buffers := make([]Buffer_Desc, len(Buffer_Type), allocator)
+	for type, i in Buffer_Type {
+		buffers[i] = buffer_desc(type)
+	}
+
+	return buffers
 }
 
 main :: proc() {
@@ -54,33 +76,22 @@ main :: proc() {
 	defer gpu.cleanup()
 	gpu.swapchain_create_from_sdl(window, FLIGHT)
 
-	frames: Renderer
-	renderer_init(&frames, cast([2]u32)(win))
-	defer renderer_destroy(&frames)
+	renderer: Renderer
+	renderer_init(&renderer, buffer_descs(context.temp_allocator), cast([2]u32)(win))
+	defer renderer_destroy(&renderer)
 
-	scene: Scene
-	{
-		upload_arena := gpu.arena_create()
-		defer gpu.arena_destroy(&upload_arena)
+	upload_m: Upload_Manager
+	upload_manager_init(&upload_m)
 
-		mesh := create_triangle_mesh()
-		cmd := gpu.commands_begin(.Main)
-		scene.mesh = mesh_upload(&upload_arena, cmd, mesh)
-		scene.index_count = u32(mesh[.IDX].len)
-		gpu.cmd_barrier(cmd, .Transfer, .All, {})
-		gpu.queue_submit(.Main, {cmd})
-		gpu.wait_idle()
-	}
-	defer mesh_destroy(&scene.mesh)
+	opaque_pass_shaders := Shader_Pair{}
+	defer for &s in opaque_pass_shaders do gpu.shader_destroy(s)
 
-	// Frame loop
 	ts_freq := sdl.GetPerformanceFrequency()
 	last_ts := sdl.GetPerformanceCounter()
-	max_dt: f64 = 0.1
 
 	for handle_window_events() {
-		sdl.GetWindowSizeInPixels(window, &win_x, &win_y)
-		if .MINIMIZED in sdl.GetWindowFlags(window) || win_x <= 0 || win_y <= 0 {
+		sdl.GetWindowSizeInPixels(window, &win.x, &win.y)
+		if .MINIMIZED in sdl.GetWindowFlags(window) || win.x <= 0 || win.y <= 0 {
 			sdl.Delay(16)
 			continue
 		}
@@ -88,22 +99,68 @@ main :: proc() {
 		now_ts := sdl.GetPerformanceCounter()
 		last_ts = now_ts
 
-		draw(&frames)
+		cmd, swapchain, arena := frame_begin(&renderer, win) or_break
+
+		update_memory(&upload_m)
+
+		opaque_pass(cmd, swapchain, arena, opaque_pass_shaders)
+
+		frame_end(&renderer, cmd)
+
 	}
 
 	gpu.wait_idle()
 }
 
-draw :: proc(frames: ^Renderer, win: [2]i32, scene: ^Scene) {
-	cmd, target, arena, ok := frame_begin(frames, win)
-	if !ok {
-		sdl.Delay(16)
-		return
-	}
-	opaque_pass(cmd, target, arena, scene)
-	frame_end(frames, cmd)
+init_window :: proc() -> (window: ^sdl.Window) {
+	window = sdl.CreateWindow(
+		Default_Config.name,
+		Default_Config.w,
+		Default_Config.h,
+		{.VULKAN, .HIGH_PIXEL_DENSITY, .FULLSCREEN},
+	)
+	ensure(window != nil)
+
+	return
 }
 
+Upload_Entry :: struct #all_or_none {
+	ptr:   gpu.ptr,
+	desc:  Buffer_Desc,
+	bytes: i64,
+}
+
+Upload_Manager :: struct {
+	entries: #soa[dynamic]Upload_Entry,
+}
+
+upload_manager_init :: proc(m: ^Upload_Manager, allocator := context.allocator) {
+	m.entries = make(#soa[dynamic]Upload_Entry, allocator)
+}
+
+upload_memory :: proc(arena: ^gpu.Arena, manager: ^Upload_Manager, desc: Buffer_Desc, data: []u8) {
+	ptr := gpu.arena_alloc_raw(arena, desc.size, desc.count, desc.align)
+	ptr.cpu = raw_data(data)
+	append(&manager.entries, Upload_Entry{ptr, desc, i64(len(data))})
+}
+
+update_memory :: proc(manager: ^Upload_Manager) {
+
+	if len(manager.entries) == 0 do return
+
+	upload_cmd := gpu.commands_begin(.Transfer)
+	for entry in manager.entries {
+		desc := entry.desc
+		local := gpu.mem_alloc_raw(desc.size, desc.count, desc.align, .GPU)
+		gpu.cmd_mem_copy_raw(upload_cmd, local, entry.ptr, entry.bytes)
+	}
+
+
+	clear(&manager.entries)
+
+	gpu.cmd_barrier(upload_cmd, .Transfer, .All)
+	gpu.queue_submit(.Transfer, {upload_cmd})
+}
 
 handle_window_events :: proc() -> bool {
 	evt: sdl.Event

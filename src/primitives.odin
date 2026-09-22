@@ -5,20 +5,20 @@ create_triangle_mesh :: proc() -> Mesh {
 	@(static) TRI_IDX := [3]u32{0, 1, 2}
 
 	mesh: Mesh
-	mesh[.POS] = Stream {
+	mesh[.POS] = Pool {
 		data = raw_data(TRI_POS[:]),
 		len  = len(TRI_POS),
-		size = GPU_Stream_Sizes[.POS],
+		size = GPU_Pool_Sizes[.POS],
 	}
-	mesh[.COL] = Stream {
+	mesh[.COL] = Pool {
 		data = raw_data(TRI_COL[:]),
 		len  = len(TRI_COL),
-		size = GPU_Stream_Sizes[.COL],
+		size = GPU_Pool_Sizes[.COL],
 	}
-	mesh[.IDX] = Stream {
+	mesh[.IDX] = Pool {
 		data = raw_data(TRI_IDX[:]),
 		len  = len(TRI_IDX),
-		size = GPU_Stream_Sizes[.IDX],
+		size = GPU_Pool_Sizes[.IDX],
 	}
 	return mesh
 }
