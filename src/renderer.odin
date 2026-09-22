@@ -5,23 +5,16 @@ import "../src/gpu/gpu"
 FLIGHT :: 3
 Shader_Pair :: [gpu.Shader_Type_Graphics]gpu.Shader
 
-Buffer_Desc :: struct {
-	size, count, align: i64,
-	type:               gpu.Memory,
-}
 
 Renderer :: struct {
 	arenas:         [FLIGHT]gpu.Arena,
-	buffers:        []gpu.gpuptr,
 	sem:            gpu.Semaphore,
 	next:           u64,
 	swapchain_size: [2]u32,
 }
 
-renderer_init :: proc(r: ^Renderer, buffers: []Buffer_Desc, size: [2]u32) {
+renderer_init :: proc(r: ^Renderer, size: [2]u32) {
 	for &a in r.arenas do a = gpu.arena_create()
-	r.buffers = make([]gpu.gpuptr, len(buffers))
-	for buffer, i in buffers do r.buffers[i] = gpu.mem_alloc_raw(buffer.size, buffer.count, buffer.align, buffer.type)
 
 	r.sem = gpu.semaphore_create(0)
 	r.next = 1
@@ -30,7 +23,6 @@ renderer_init :: proc(r: ^Renderer, buffers: []Buffer_Desc, size: [2]u32) {
 
 renderer_destroy :: proc(r: ^Renderer) {
 	for &a in r.arenas do gpu.arena_destroy(&a)
-	for &b in r.buffers do gpu.mem_free_raw(b)
 	gpu.semaphore_destroy(r.sem)
 }
 

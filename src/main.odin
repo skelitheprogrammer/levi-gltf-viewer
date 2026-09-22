@@ -37,24 +37,19 @@ Buffer_Aligns := [Buffer_Type]i64 {
 }
 
 @(rodata)
+Buffer_Counts := [Buffer_Type]i64 {
+	.POS = 1024,
+	.COL = 1024,
+	.IDX = 1024,
+}
+
+@(rodata)
 Buffer_Memory := [Buffer_Type]gpu.Memory {
 	.POS = .GPU,
 	.COL = .GPU,
 	.IDX = .GPU,
 }
 
-buffer_desc :: proc(type: Buffer_Type) -> Buffer_Desc {
-	return {size = Buffer_Sizes[type], align = Buffer_Aligns[type], type = Buffer_Memory[type]}
-}
-
-buffer_descs :: proc(allocator := context.allocator) -> []Buffer_Desc {
-	buffers := make([]Buffer_Desc, len(Buffer_Type), allocator)
-	for type, i in Buffer_Type {
-		buffers[i] = buffer_desc(type)
-	}
-
-	return buffers
-}
 
 main :: proc() {
 	flags.parse_or_exit(&Default_Config, os.args)
@@ -77,11 +72,11 @@ main :: proc() {
 	gpu.swapchain_create_from_sdl(window, FLIGHT)
 
 	renderer: Renderer
-	renderer_init(&renderer, buffer_descs(context.temp_allocator), cast([2]u32)(win))
+	renderer_init(&renderer, cast([2]u32)(win))
 	defer renderer_destroy(&renderer)
 
-	upload_m: Upload_Manager
-	upload_manager_init(&upload_m)
+	pool: Pool_State(Buffer_Type)
+	pool_init(&pool, Buffer_Sizes, Buffer_Aligns, Buffer_Aligns, Buffer_Memory)
 
 	opaque_pass_shaders := Shader_Pair{}
 	defer for &s in opaque_pass_shaders do gpu.shader_destroy(s)
@@ -101,7 +96,7 @@ main :: proc() {
 
 		cmd, swapchain, arena := frame_begin(&renderer, win) or_break
 
-		update_memory(&upload_m)
+		handle_staging()
 
 		opaque_pass(cmd, swapchain, arena, opaque_pass_shaders)
 
@@ -124,43 +119,6 @@ init_window :: proc() -> (window: ^sdl.Window) {
 	return
 }
 
-Upload_Entry :: struct #all_or_none {
-	ptr:   gpu.ptr,
-	desc:  Buffer_Desc,
-	bytes: i64,
-}
-
-Upload_Manager :: struct {
-	entries: #soa[dynamic]Upload_Entry,
-}
-
-upload_manager_init :: proc(m: ^Upload_Manager, allocator := context.allocator) {
-	m.entries = make(#soa[dynamic]Upload_Entry, allocator)
-}
-
-upload_memory :: proc(arena: ^gpu.Arena, manager: ^Upload_Manager, desc: Buffer_Desc, data: []u8) {
-	ptr := gpu.arena_alloc_raw(arena, desc.size, desc.count, desc.align)
-	ptr.cpu = raw_data(data)
-	append(&manager.entries, Upload_Entry{ptr, desc, i64(len(data))})
-}
-
-update_memory :: proc(manager: ^Upload_Manager) {
-
-	if len(manager.entries) == 0 do return
-
-	upload_cmd := gpu.commands_begin(.Transfer)
-	for entry in manager.entries {
-		desc := entry.desc
-		local := gpu.mem_alloc_raw(desc.size, desc.count, desc.align, .GPU)
-		gpu.cmd_mem_copy_raw(upload_cmd, local, entry.ptr, entry.bytes)
-	}
-
-
-	clear(&manager.entries)
-
-	gpu.cmd_barrier(upload_cmd, .Transfer, .All)
-	gpu.queue_submit(.Transfer, {upload_cmd})
-}
 
 handle_window_events :: proc() -> bool {
 	evt: sdl.Event
