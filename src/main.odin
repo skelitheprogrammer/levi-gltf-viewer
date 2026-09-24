@@ -16,40 +16,6 @@ Config :: struct {
 
 Default_Config := Config{"TheGame", 3440, 1440}
 
-Buffer_Type :: enum {
-	POS,
-	COL,
-	IDX,
-}
-
-@(rodata)
-Buffer_Sizes := [Buffer_Type]i64 {
-	.POS = size_of([4]f32),
-	.COL = size_of([4]f32),
-	.IDX = size_of(u32),
-}
-
-@(rodata)
-Buffer_Aligns := [Buffer_Type]i64 {
-	.POS = align_of([4]f32),
-	.COL = align_of([4]f32),
-	.IDX = align_of(u32),
-}
-
-@(rodata)
-Buffer_Counts := [Buffer_Type]i64 {
-	.POS = 1024,
-	.COL = 1024,
-	.IDX = 1024,
-}
-
-@(rodata)
-Buffer_Memory := [Buffer_Type]gpu.Memory {
-	.POS = .GPU,
-	.COL = .GPU,
-	.IDX = .GPU,
-}
-
 
 main :: proc() {
 	flags.parse_or_exit(&Default_Config, os.args)
@@ -75,14 +41,17 @@ main :: proc() {
 	renderer_init(&renderer, cast([2]u32)(win))
 	defer renderer_destroy(&renderer)
 
-	pool: Pool_State(Buffer_Type)
-	pool_init(&pool, Buffer_Sizes, Buffer_Aligns, Buffer_Aligns, Buffer_Memory)
+	buffers: Buffers
+	buffers_init(&buffers, 1024)
 
 	opaque_pass_shaders := Shader_Pair{}
 	defer for &s in opaque_pass_shaders do gpu.shader_destroy(s)
 
+	init_data(&buffers)
+
 	ts_freq := sdl.GetPerformanceFrequency()
 	last_ts := sdl.GetPerformanceCounter()
+
 
 	for handle_window_events() {
 		sdl.GetWindowSizeInPixels(window, &win.x, &win.y)
@@ -96,7 +65,6 @@ main :: proc() {
 
 		cmd, swapchain, arena := frame_begin(&renderer, win) or_break
 
-		handle_staging()
 
 		opaque_pass(cmd, swapchain, arena, opaque_pass_shaders)
 
@@ -119,6 +87,16 @@ init_window :: proc() -> (window: ^sdl.Window) {
 	return
 }
 
+
+init_data :: proc(b: ^Buffers) {
+	upload := gpu.arena_create()
+	defer gpu.arena_destroy(&upload)
+	cmd := gpu.commands_begin(.Transfer)
+
+
+	gpu.cmd_barrier(cmd, .Transfer, .All)
+	gpu.queue_submit(.Main, {cmd})
+}
 
 handle_window_events :: proc() -> bool {
 	evt: sdl.Event

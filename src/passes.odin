@@ -2,7 +2,6 @@ package main
 
 import "../src/gpu/gpu"
 
-
 opaque_pass :: proc(
 	cmd: gpu.Command_Buffer,
 	target: gpu.Texture,
@@ -24,6 +23,6 @@ opaque_pass :: proc(
 
 	verts := gpu.arena_alloc(arena, Vert_Data)
 
-	gpu.cmd_draw_indexed_raw(cmd, verts, gpu.null, m[.IDX], .U32, scene.index_count)
+	// gpu.cmd_draw_indexed_raw(cmd, verts, gpu.null, m[.IDX], .U32, scene.index_count)
 	gpu.cmd_end_render_pass(cmd)
 }

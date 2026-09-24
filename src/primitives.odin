@@ -1,24 +1,25 @@
 package main
-create_triangle_mesh :: proc() -> Mesh {
-	@(static) TRI_POS := [3][4]f32{{-.5, -.5, 0, 1}, {0, .5, 0, 1}, {.5, -.5, 0, 1}}
-	@(static) TRI_COL := [3][4]f32{{1, 0, 0, 1}, {0, 1, 0, 1}, {0, 0, 1, 1}}
-	@(static) TRI_IDX := [3]u32{0, 1, 2}
 
-	mesh: Mesh
-	mesh[.POS] = Pool {
-		data = raw_data(TRI_POS[:]),
-		len  = len(TRI_POS),
-		size = GPU_Pool_Sizes[.POS],
-	}
-	mesh[.COL] = Pool {
-		data = raw_data(TRI_COL[:]),
-		len  = len(TRI_COL),
-		size = GPU_Pool_Sizes[.COL],
-	}
-	mesh[.IDX] = Pool {
-		data = raw_data(TRI_IDX[:]),
-		len  = len(TRI_IDX),
-		size = GPU_Pool_Sizes[.IDX],
-	}
-	return mesh
+import "../src/gpu/gpu"
+
+Buffers :: struct {
+	vertex:    gpu.ptr,
+	indices:   gpu.ptr,
+	vert_used: u64,
+	idx_used:  u64,
+	capacity:  u64,
+	meshes:    [dynamic]Mesh,
+}
+
+Mesh :: struct {
+	vert_offset: u32,
+	idx_offset:  u32,
+	vert_count:  u32,
+	idx_count:   u32,
+}
+
+buffers_init :: proc(b: ^Buffers, capacity: u64) {
+	b.vertex = gpu.mem_alloc_raw(1, capacity, 16, .GPU)
+	b.indices = gpu.mem_alloc_raw(1, capacity, 4, .GPU)
+	b.capacity = capacity
 }
